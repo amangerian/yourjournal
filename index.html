@@ -19,6 +19,15 @@
 :root[data-theme=light]{--bg:#faf9f6;--fg:#1b1a18;--mut:#6f6a63;--card:#fff;--line:#e3ded5;
 --acc:#7a4b2a;--hi:#f2ede4;--up:#2f6b45;--upbg:#e4f0e8;--dn:#8a3b32;--dnbg:#f7e7e4;
 --star:#a8801c;--starbg:#f8f0d9;--rule:#cfc7ba}
+:root[data-theme=sepia]{--bg:#f4ecd8;--fg:#3b2f21;--mut:#7c6a52;--card:#fbf5e6;--line:#ddd0b4;
+--acc:#8a5a2b;--hi:#ece0c6;--up:#4a6b3a;--upbg:#e2ebd6;--dn:#9a4432;--dnbg:#f2ddd6;
+--star:#9a7a1c;--starbg:#f0e6c8;--rule:#c9b998}
+:root[data-theme=slate]{--bg:#11151a;--fg:#dde5ee;--mut:#8e9bab;--card:#1a2029;--line:#2c3642;
+--acc:#7fb3e0;--hi:#1f2732;--up:#6fc2a0;--upbg:#16302a;--dn:#e08b8b;--dnbg:#33201f;
+--star:#d8b46a;--starbg:#2b2517;--rule:#3a4552}
+:root[data-theme=contrast]{--bg:#000;--fg:#fff;--mut:#c9c9c9;--card:#0b0b0b;--line:#5a5a5a;
+--acc:#ffd166;--hi:#1a1a1a;--up:#5ee08a;--upbg:#03260f;--dn:#ff8f80;--dnbg:#2b0d09;
+--star:#ffd166;--starbg:#2a2205;--rule:#6b6b6b}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--fg);font:16px/1.55 ui-serif,Georgia,"Times New Roman",serif;
 margin:0;padding:0 1.25rem 6rem}
@@ -284,6 +293,52 @@ font:11px ui-sans-serif,system-ui;padding:.2rem .5rem;cursor:pointer;transition:
   color:var(--fg);border-radius:7px;padding:.55rem .7rem;font:inherit;font-size:.95rem}
 .newrow input:focus{outline:none;border-color:var(--acc)}
 
+/* ---- reaction emoji ------------------------------------------------------
+   The stock 👍 renders bright yellow and out-shouts the headline it sits under.
+   Desaturate the emoji and let the button's border and background carry state.
+   ★ is a text glyph coloured by var(--star), so it must NOT be filtered. */
+.acts button[data-v],.acts button.sv,.paper-sv.sv,.trl .sv{filter:grayscale(1)}
+.acts button[data-v].on,.acts button.sv.on{filter:grayscale(.45)}
+
+/* ---- favourites ---------------------------------------------------------- */
+.acts button.fav{color:var(--mut)}
+.acts button.fav.on{background:var(--starbg);border-color:var(--star);color:var(--star);opacity:1}
+.card.favd{border-left:3px solid var(--star)}
+.story .fav{margin-left:.25rem}
+.story .fav.on{color:var(--star)}
+
+/* ---- subtopic interest ranking ------------------------------------------- */
+.rankbox{background:var(--hi);border:1px solid var(--line);border-radius:10px;
+padding:.85rem 1rem;margin:0 0 1.4rem}
+.rankhead{display:flex;gap:.6rem;align-items:baseline;flex-wrap:wrap;
+font:13px ui-sans-serif,system-ui}
+.rankhead .hint{color:var(--mut);font-size:12px}
+.ranklist{list-style:none;margin:.7rem 0 0;padding:0;display:flex;flex-direction:column;gap:.18rem}
+.ranklist li{display:flex;gap:.55rem;align-items:center;background:var(--card);
+border:1px solid var(--line);border-radius:7px;padding:.3rem .55rem;
+font:13px ui-sans-serif,system-ui}
+.ranklist .pos{flex:0 0 1.4rem;color:var(--mut);font-variant-numeric:tabular-nums;font-size:12px}
+.ranklist .rname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ranklist .rw{color:var(--mut);font-size:11px;font-variant-numeric:tabular-nums}
+.ranklist .rbtns{display:flex;gap:.1rem;flex:0 0 auto}
+.ranklist .linkbtn{padding:.1rem .3rem;font-size:12px}
+.ranklist .linkbtn[disabled]{opacity:.25;cursor:default}
+.ranklist .linkbtn.drop:hover{color:var(--dn)}
+
+/* ---- theme picker -------------------------------------------------------- */
+.themes{display:grid;grid-template-columns:repeat(auto-fill,minmax(11rem,1fr));gap:.5rem;
+margin:.6rem 0 1rem}
+.themes button{display:flex;gap:.55rem;align-items:center;text-align:left;cursor:pointer;
+background:var(--card);border:1px solid var(--line);border-radius:9px;padding:.55rem .65rem;
+color:var(--fg);font:inherit;font-size:.9rem}
+.themes button:hover{border-color:var(--acc)}
+.themes button.on{border-color:var(--up);background:var(--upbg)}
+.themes .sw{flex:0 0 auto;width:2.1rem;height:1.5rem;border-radius:5px;border:1px solid var(--line);
+display:flex;overflow:hidden}
+.themes .sw i{flex:1}
+.themes .tn{display:block;font-weight:600;line-height:1.25}
+.themes .td{display:block;font:11px ui-sans-serif,system-ui;color:var(--mut)}
+
 </style>
 </head>
 <body>
@@ -335,7 +390,7 @@ function newProfile(name) {
   const u = {
     id: uid, name: name || 'Reader', created: new Date().toISOString(),
     step: 'specialties', specialties: [], subtopics: [], axisScores: {},
-    journals: [], feedback: {}, library: {}, weights: {}, seen: [], run: null,
+    journals: [], feedback: {}, library: {}, favorites: {}, weights: {}, seen: [], run: null,
   };
   profiles.push({ id: uid, name: u.name });
   lsSet('profiles', profiles);
@@ -344,8 +399,41 @@ function newProfile(name) {
   return u;
 }
 
-function loadProfile(id) { return lsGet('u:' + id, null); }
+function loadProfile(id) {
+  const u = lsGet('u:' + id, null);
+  if (u && !u.favorites) u.favorites = {};   // profiles created before favorites existed
+  return u;
+}
 function saveUser() { lsSet('u:' + USER.id, USER); }
+
+/* ------------------------------------------------------------------- themes */
+
+/* A display preference, so it lives per-browser rather than per-profile — switching
+   readers on a shared laptop shouldn't repaint the screen. 'auto' means: set no
+   attribute and let the prefers-color-scheme block decide. */
+const THEMES = [
+  ['auto',     'Match system', 'Follows your OS light/dark setting', ['#faf9f6', '#14140f']],
+  ['light',    'Newsprint',    'Warm paper, dark ink',               ['#faf9f6', '#e3ded5']],
+  ['dark',     'Night',        'Warm dark, the current default',     ['#14140f', '#d9a273']],
+  ['sepia',    'Sepia',        'Softer, older paper',                ['#f4ecd8', '#8a5a2b']],
+  ['slate',    'Slate',        'Cool grey-blue, low glare',          ['#11151a', '#7fb3e0']],
+  ['contrast', 'High contrast','Pure black, maximum legibility',     ['#000000', '#ffd166']],
+];
+
+function applyTheme(v) {
+  const t = v || lsGet('theme', 'auto');
+  if (t === 'auto') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', t);
+}
+
+function themePicker() {
+  const cur = lsGet('theme', 'auto');
+  return `<div class="themes">` + THEMES.map(([id, name, desc, sw]) =>
+    `<button type="button" class="${id === cur ? 'on' : ''}" data-settheme="${id}">
+      <span class="sw"><i style="background:${sw[0]}"></i><i style="background:${sw[1]}"></i></span>
+      <span><span class="tn">${esc(name)}</span><span class="td">${esc(desc)}</span></span>
+    </button>`).join('') + `</div>`;
+}
 
 const DAY = 864e5;
 const EXPORT_EVERY = 7 * DAY;   // remind once a week
@@ -425,15 +513,34 @@ const subtopicIndex = () => {
   return m;
 };
 
+/* USER.subtopics is stored most-interesting-first, so a subtopic's rank is its index.
+   The ramp is deliberately gentle: rank should tilt a close call, not let #1 bury #12.
+   A term shared by several subtopics keeps the best (highest) weight of them. */
+const RANK_TOP = 1.35, RANK_BOTTOM = 0.75;
+
+function rankWeights(u) {
+  const n = u.subtopics.length, m = new Map();
+  u.subtopics.forEach((k, i) =>
+    m.set(k, n < 2 ? 1 : RANK_TOP - (RANK_TOP - RANK_BOTTOM) * (i / (n - 1))));
+  return m;
+}
+
 function userTerms(u) {
-  const idx = subtopicIndex(), counts = new Map();
+  const idx = subtopicIndex(), counts = new Map(), best = new Map();
+  const rw = rankWeights(u);
   for (const key of u.subtopics) {
     const pair = idx.get(key);
     if (!pair) continue;
-    for (const t of pair[1].terms) counts.set(t.toLowerCase(), (counts.get(t.toLowerCase()) || 0) + 1);
+    const w = rw.get(key) ?? 1;
+    for (const raw of pair[1].terms) {
+      const t = raw.toLowerCase();
+      counts.set(t, (counts.get(t) || 0) + 1);
+      best.set(t, Math.max(best.get(t) || 0, w));
+    }
   }
   const out = new Map();
-  for (const [t, c] of counts) out.set(t, Math.min(1, 0.62 + 0.16 * (c - 1)));
+  // topic score clamps at 1 downstream, so a >1 weight buys reach, not runaway scores.
+  for (const [t, c] of counts) out.set(t, Math.min(1, 0.62 + 0.16 * (c - 1)) * (best.get(t) || 1));
   return out;
 }
 
@@ -455,7 +562,13 @@ function scoreArticle(a, u, terms, priors) {
   const hits = [];
   for (const [t, w] of terms) if (hasPhrase(hay, t)) hits.push([t, w]);
   hits.sort((x, y) => y[1] - x[1]);
-  const topic = hits.length ? Math.min(1, hits.slice(0, 6).reduce((s, h) => s + h[1], 0) / 2.6) : 0;
+  /* Saturating rather than clamped. A hard min(1, sum/2.6) pinned every well-matched
+     article to exactly 1.0, which threw away the ordering *within* the good ones — and
+     made subtopic rank weights invisible, since they only shift a sum that was already
+     over the cap. This curve approaches 1 without reaching it, so weights always tell. */
+  const topic = hits.length
+    ? 1 - Math.exp(-hits.slice(0, 8).reduce((s, h) => s + h[1], 0) / 1.8)
+    : 0;
 
   let axTotal = 0, axN = 0;
   const axDetail = {};
@@ -744,15 +857,27 @@ function nav(view) {
   const ready = USER.step === 'ready';
   const tab = (v, label) => `<a class="tab ${view === v ? 'on' : ''}" data-view="${v}">${label}</a>`;
   const n = Object.keys(USER.library).length;
+  const f = Object.keys(USER.favorites || {}).length;
   return `<nav><div class="in"><span class="brand" data-view="${ready ? 'feed' : 'onboard'}">Your Journal</span>` +
     (ready
       ? tab('feed', 'Feed') + tab('paper', 'The Paper') + tab('saved', `To Read Later · ${n}`) +
+        tab('favorites', `★ ${f}`) +
         tab('settings', 'Settings') + tab('how', 'How it works')
       : tab('onboard', 'Set up') + tab('how', 'How it works')) +
     `<span class="sp"></span><span class="who">${esc(USER.name)} · <a data-view="switch">switch</a></span></div></nav>`;
 }
 
-const BANNER_ON = new Set(['feed', 'saved', 'settings']);
+/* Keep the nav counters honest when a view updates in place instead of re-rendering. */
+function syncCounts() {
+  const set = (v, label) => {
+    const el = document.querySelector(`nav a.tab[data-view="${v}"]`);
+    if (el) el.textContent = label;
+  };
+  set('saved', `To Read Later · ${Object.keys(USER.library).length}`);
+  set('favorites', `★ ${Object.keys(USER.favorites || {}).length}`);
+}
+
+const BANNER_ON = new Set(['feed', 'saved', 'favorites', 'settings']);
 let VIEW = '';
 const currentView = () => VIEW || 'feed';
 
@@ -841,8 +966,12 @@ function viewHow() {
         <tr><td>👍👍</td><td><b>Very interested.</b> Counts twice as hard as a single thumbs-up.</td></tr>
         <tr><td>👍</td><td><b>Interested.</b> Nudges the model toward this kind of article.</td></tr>
         <tr><td>👎</td><td><b>Not interested.</b> Pushes similar articles down next week.</td></tr>
-        <tr><td>📖</td><td><b>To Read Later.</b> Saves it. Deliberately does <i>not</i> change your
-          ranking — so you can shelve something without claiming it should shape your feed.</td></tr>
+        <tr><td>📖</td><td><b>To Read Later.</b> The queue — things you mean to get to.
+          Deliberately does <i>not</i> change your ranking, so you can shelve something without
+          claiming it should shape your feed.</td></tr>
+        <tr><td>★</td><td><b>Favorite.</b> The keepers, kept separately from the queue so working
+          through your reading list never clears out the papers you wanted to hold on to.
+          Also no effect on ranking.</td></tr>
       </table>
       <p>Under the hood, rating an article extracts every phrase in its title and abstract and
       shifts the weight on each one. After ~20 ratings your feed visibly diverges from the
@@ -881,7 +1010,7 @@ function stepsBar(cur) {
 function viewSpecialties() {
   const chosen = new Set(USER.specialties);
   const cards = DATA.taxonomy.specialties.map(s =>
-    `<button class="pick multi ${chosen.has(s.id) ? 'on' : ''}" data-val="${s.id}">
+    `<button type="button" class="pick multi ${chosen.has(s.id) ? 'on' : ''}" data-val="${s.id}">
       <span class="box"></span><span class="ic">${s.icon}</span><span><span class="nm">${esc(s.name)}</span>
       <span class="ct">${s.subtopics.length} subtopics</span></span></button>`).join('');
   render('onboard', stepsBar('specialties') + `<h1>What do you practise?</h1>
@@ -893,6 +1022,50 @@ function viewSpecialties() {
       ${chosen.size ? '' : 'disabled'}>Continue with ${chosen.size} →</button></div></form>`);
 }
 
+/* The chosen subtopics, in interest order, with move controls. Lives above the grid and
+   re-renders in place on every toggle — a separate ranking step would be one screen too
+   many, and ordering only makes sense while you can still see what you picked. */
+function rankPanel() {
+  const idx = subtopicIndex();
+  const rw = rankWeights(USER);
+  const rows = USER.subtopics.map((key, i) => {
+    const st = (idx.get(key) || [null, null])[1];
+    if (!st) return '';
+    const w = rw.get(key) ?? 1;
+    return `<li data-rank="${esc(key)}">
+      <span class="pos">${i + 1}</span>
+      <span class="rname">${esc(st.name)}</span>
+      <span class="rw" title="Weight applied to this subtopic's keywords">×${w.toFixed(2)}</span>
+      <span class="rbtns">
+        <button type="button" class="linkbtn" data-move="up" ${i === 0 ? 'disabled' : ''}
+          title="More interesting">▲</button>
+        <button type="button" class="linkbtn" data-move="down"
+          ${i === USER.subtopics.length - 1 ? 'disabled' : ''} title="Less interesting">▼</button>
+        <button type="button" class="linkbtn drop" data-move="off" title="Remove">✕</button>
+      </span></li>`;
+  }).join('');
+
+  return `<div class="rankbox" id="rankbox">
+    <div class="rankhead"><b>Your picks, most interesting first</b>
+      <span class="hint">${USER.subtopics.length
+        ? 'Order matters — the top ones get more weight. Leave it alone for equal footing.'
+        : 'Nothing picked yet. Tap tiles below.'}</span></div>
+    ${USER.subtopics.length ? `<ol class="ranklist">${rows}</ol>` : ''}</div>`;
+}
+
+function refreshRankPanel(form) {
+  const box = form?.querySelector('#rankbox');
+  if (box) box.outerHTML = rankPanel();
+}
+
+function countBtn(form) {
+  const btn = form?.querySelector('[data-count]');
+  if (!btn) return;
+  const n = form.querySelectorAll('.pick.multi.on').length;
+  btn.disabled = n === 0;
+  btn.textContent = btn.dataset.count.replace('{n}', n);
+}
+
 function viewSubtopics() {
   const chosen = new Set(USER.subtopics);
   const groups = USER.specialties.map(sid => {
@@ -900,7 +1073,7 @@ function viewSubtopics() {
     if (!s) return '';
     const cards = s.subtopics.map(st => {
       const key = sid + ':' + st.id;
-      return `<button class="pick multi ${chosen.has(key) ? 'on' : ''}" data-val="${esc(key)}">
+      return `<button type="button" class="pick multi ${chosen.has(key) ? 'on' : ''}" data-val="${esc(key)}">
         <span class="box"></span><span><span class="nm">${esc(st.name)}</span>
         <span class="ct">${st.terms.length} keywords</span></span></button>`;
     }).join('');
@@ -913,7 +1086,7 @@ function viewSubtopics() {
     <div class="sub"><b>Pick as many as you like — tap to toggle, they stay selected.</b>
     These supply the vocabulary your ranking is built from; about 4,500 keywords sit behind these
     tiles. Anywhere from 5 to 30 works well, and you can change them later.</div>
-    <form id="multi" data-next="pairs">${groups}
+    <form id="multi" data-next="pairs">${rankPanel()}${groups}
     <div class="row sticky-row"><button class="btn" type="submit" data-count="Continue with {n} →"
       ${chosen.size ? '' : 'disabled'}>Continue with ${chosen.size} →</button>
     <button class="btn ghost" type="button" data-goto="specialties">← Back</button></div></form>`);
@@ -991,7 +1164,7 @@ function viewPairs() {
 /* Journals: suggested set on top, then the entire searchable registry so a reader can
    add anything we did not think to suggest. */
 function journalRow(j, on) {
-  return `<button class="pick multi ${on ? 'on' : ''}" data-val="${esc(j.abbrev)}"
+  return `<button type="button" class="pick multi ${on ? 'on' : ''}" data-val="${esc(j.abbrev)}"
     data-search="${esc((j.name + ' ' + j.abbrev + ' ' + (j.why || '')).toLowerCase())}">
     <span class="box"></span><span><span class="nm">${esc(j.name)}</span>
     <span class="ct">${j.why ? esc(j.why) + '<br>' : ''}${(j.volume || 0).toLocaleString()} indexed</span></span></button>`;
@@ -1036,10 +1209,11 @@ function viewJournals() {
 function articleCard(a, rank, opts = {}) {
   const fb = USER.feedback[a.pmid] || {};
   const saved = !!USER.library[a.pmid];
+  const fav = !!(USER.favorites || {})[a.pmid];
   const sc = finalScore(a);
   const auth = a.authors || [];
   const who = auth.length > 2 ? auth[0] + ' et al.' : auth.join(', ') || '—';
-  const cls = 'card' + (fb.verdict === 'dislike' ? ' dis' : '') + (saved ? ' sav' : '');
+  const cls = 'card' + (fb.verdict === 'dislike' ? ' dis' : '') + (saved ? ' sav' : '') + (fav ? ' favd' : '');
   const tags = (a.why?.matched || []).slice(0, 5).map(t => `<span class="tag">${esc(t)}</span>`).join('');
   return `<div class="${cls}">
     <div class="top"><span class="rk">${rank}</span><span class="sc">${sc}</span>
@@ -1055,6 +1229,8 @@ function articleCard(a, rank, opts = {}) {
         <button data-v="like" class="${fb.verdict === 'like' ? 'on' : ''}" title="Interested">👍</button>
         <button data-v="dislike" class="${fb.verdict === 'dislike' ? 'on' : ''}" title="Not interested">👎</button>
         <button class="sv ${saved ? 'on' : ''}" title="Add to To Read Later">${saved ? '📖 Saved' : '📖 Read later'}</button>
+        <button class="fav ${fav ? 'on' : ''}" data-fav="${esc(a.pmid)}"
+          title="${fav ? 'Remove from Favorites' : 'Favorite — keep this one for good'}">${fav ? '★ Favorite' : '☆ Favorite'}</button>
         <span class="st"></span></div>
     </div></div>`;
 }
@@ -1128,9 +1304,12 @@ function paperStory(a, size) {
   const au = a.authors || [];
   const who = au.length > 2 ? au[0] + ' et al.' : au.join(', ');
   const saved = !!USER.library[a.pmid];
+  const fav = !!(USER.favorites || {})[a.pmid];
   const dek = a.blurb || firstSentences(a.abstract, size === 'big' ? 3 : 2, size === 'big' ? 420 : 240);
   const btn = `<button class="sv paper-sv ${saved ? 'on' : ''}" data-papersave="${esc(a.pmid)}"
-    title="Add to To Read Later">${saved ? '📖 Saved' : '📖'}</button>`;
+    title="Add to To Read Later">${saved ? '📖 Saved' : '📖'}</button>
+    <button class="fav paper-sv ${fav ? 'on' : ''}" data-fav="${esc(a.pmid)}"
+      title="${fav ? 'Remove from Favorites' : 'Favorite'}">${fav ? '★' : '☆'}</button>`;
   return `<div class="story ${size}">
     <div class="src">${esc(a.journalName || a.journal)}</div>
     <h4><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title)}</a></h4>
@@ -1210,6 +1389,19 @@ function viewSaved() {
     items.map((it, i) => articleCard({ ...it, why: { matched: [] } }, i + 1, { noMeter: true })).join(''));
 }
 
+function viewFavorites() {
+  const items = Object.values(USER.favorites || {})
+    .sort((a, b) => (b.favedAt || '').localeCompare(a.favedAt || ''));
+  if (!items.length) return render('favorites', `<h1>Favorites</h1>
+    <div class="empty">Nothing favorited yet. Hit <b>☆ Favorite</b> on any article in the
+    <a data-view="feed">Feed</a> or <a data-view="paper">The Paper</a>.
+    <p class="hint">Favorites are the keepers — 📖 <a data-view="saved">To Read Later</a> is the
+    queue you work through. Neither one changes your ranking.</p></div>`);
+  render('favorites', `<h1>Favorites</h1>
+    <div class="sub">${items.length} kept · newest first · favoriting never changes your ranking</div>` +
+    items.map((it, i) => articleCard({ ...it, why: { matched: [] } }, i + 1, { noMeter: true })).join(''));
+}
+
 function viewSettings() {
   const idx = subtopicIndex();
   const subs = USER.subtopics.map(k => (idx.get(k) || [null, {}])[1].name).filter(Boolean);
@@ -1228,7 +1420,12 @@ function viewSettings() {
   render('settings', `<h1>Your formula</h1>
     <div class="sub">Everything here is editable. Changes apply from your next issue.
     <a data-view="how">How it all works →</a></div>
-    <h2>Topics</h2><div class="sub">${esc(subs.join(', ')) || 'none'} · <a data-goto="subtopics">change</a></div>
+    <h2>Topics · most interesting first</h2>
+      <div class="sub">${subs.map((s, i) => `${i + 1}. ${esc(s)}`).join(' · ') || 'none'} ·
+      <a data-goto="subtopics">change or reorder</a></div>
+    <h2>Appearance</h2>
+      <div class="sub">Applies to this browser, for every profile on it.</div>
+      ${themePicker()}
     <h2>Reading style</h2><div class="cols two">${axRows}</div>
       <div class="sub" style="margin-top:1rem"><a data-goto="pairs">retake the this-or-that</a></div>
     <h2>Journals · ${USER.journals.length}</h2><div class="sub">${esc(jl) || 'none'} ·
@@ -1295,6 +1492,7 @@ function go(view) {
     case 'feed': case 'ready': return viewFeed();
     case 'paper': return viewPaper();
     case 'saved': return viewSaved();
+    case 'favorites': return viewFavorites();
     case 'settings': return viewSettings();
     default: return viewFeed();
   }
@@ -1367,9 +1565,16 @@ document.addEventListener('click', async e => {
     const sid = (selAll || selNone).dataset.selectall || (selNone).dataset.selectnone;
     const grp = (selAll || selNone).closest('.grp');
     grp.querySelectorAll('.pick.multi').forEach(p => p.classList.toggle('on', !!selAll));
-    const form = grp.closest('form'), btn = form?.querySelector('[data-count]');
-    if (btn) { const n = form.querySelectorAll('.pick.multi.on').length;
-      btn.disabled = n === 0; btn.textContent = btn.dataset.count.replace('{n}', n); }
+    const form = grp.closest('form');
+    if (form?.dataset.next === 'pairs') {
+      const keys = [...grp.querySelectorAll('.pick.multi')].map(p => p.dataset.val);
+      const set = new Set(keys);
+      USER.subtopics = selAll
+        ? [...USER.subtopics, ...keys.filter(k => !USER.subtopics.includes(k))]
+        : USER.subtopics.filter(k => !set.has(k));
+      refreshRankPanel(form);
+    }
+    countBtn(form);
     return;
   }
 
@@ -1386,6 +1591,7 @@ document.addEventListener('click', async e => {
     saveUser();
     psave.classList.toggle('on', on);
     psave.textContent = on ? '📖 Saved' : '📖';
+    syncCounts();
     toast(on ? 'Added to To Read Later' : 'Removed');
     return;
   }
@@ -1397,12 +1603,62 @@ document.addEventListener('click', async e => {
   if (multi) {
     multi.classList.toggle('on');
     const form = multi.closest('form');
-    const btn = form?.querySelector('[data-count]');
-    if (btn) {
-      const n = form.querySelectorAll('.pick.multi.on').length;
-      btn.disabled = n === 0;
-      btn.textContent = btn.dataset.count.replace('{n}', n);
+    // On the subtopics screen selection order IS the interest ranking, so track it live:
+    // newly picked goes to the bottom, and the panel above re-renders in place.
+    if (form?.dataset.next === 'pairs') {
+      const key = multi.dataset.val;
+      USER.subtopics = multi.classList.contains('on')
+        ? [...USER.subtopics.filter(k => k !== key), key]
+        : USER.subtopics.filter(k => k !== key);
+      refreshRankPanel(form);
     }
+    countBtn(form);
+    return;
+  }
+
+  /* ★ works from the Feed, The Paper and the Favorites list itself. Updates in place —
+     a full re-render would scroll the reader back to the top mid-triage. The one
+     exception is the Favorites list, where un-starring has to remove the row. */
+  const favBtn = t.closest('[data-fav]');
+  if (favBtn) {
+    const pmid = favBtn.dataset.fav;
+    USER.favorites = USER.favorites || {};
+    const on = !USER.favorites[pmid];
+    if (on) {
+      const a = findArticle(pmid);
+      USER.favorites[pmid] = { pmid, title: a.title, journalName: a.journalName || a.journal,
+        authors: (a.authors || []).slice(0, 6), url: a.url, score: finalScore(a),
+        abstract: a.abstract || '', blurb: a.blurb || '', favedAt: new Date().toISOString() };
+    } else delete USER.favorites[pmid];
+    saveUser();
+    if (VIEW === 'favorites') return go('favorites');
+    const inPaper = !!favBtn.closest('.story');
+    favBtn.classList.toggle('on', on);
+    favBtn.textContent = inPaper ? (on ? '★' : '☆') : (on ? '★ Favorite' : '☆ Favorite');
+    favBtn.title = on ? 'Remove from Favorites' : 'Favorite';
+    favBtn.closest('.card')?.classList.toggle('favd', on);
+    syncCounts();
+    return;
+  }
+
+  const mv = t.closest('[data-move]');
+  if (mv) {
+    const li = mv.closest('[data-rank]'), key = li.dataset.rank;
+    const i = USER.subtopics.indexOf(key);
+    if (i < 0) return;
+    const dir = mv.dataset.move;
+    if (dir === 'off') {
+      USER.subtopics.splice(i, 1);
+      const tile = document.querySelector(`.pick.multi[data-val="${CSS.escape(key)}"]`);
+      if (tile) tile.classList.remove('on');
+    } else {
+      const j = dir === 'up' ? i - 1 : i + 1;
+      if (j < 0 || j >= USER.subtopics.length) return;
+      [USER.subtopics[i], USER.subtopics[j]] = [USER.subtopics[j], USER.subtopics[i]];
+    }
+    const form = document.getElementById('multi');
+    refreshRankPanel(form);
+    countBtn(form);
     return;
   }
 
@@ -1444,7 +1700,8 @@ document.addEventListener('click', async e => {
   if (sb) {
     const w = sb.closest('.acts'), pmid = w.dataset.pmid, on = !w.dataset.saved;
     w.dataset.saved = on ? '1' : '';
-    sb.classList.toggle('on', on); sb.textContent = on ? '★' : '☆';
+    sb.classList.toggle('on', on);
+    sb.textContent = on ? '📖 Saved' : '📖 Read later';
     w.closest('.card')?.classList.toggle('sav', on);
     const a = findArticle(pmid);
     if (on) {
@@ -1453,6 +1710,7 @@ document.addEventListener('click', async e => {
         blurb: a.blurb || '', savedAt: new Date().toISOString() };
     } else delete USER.library[pmid];
     saveUser();
+    syncCounts();
     return;
   }
 
@@ -1472,6 +1730,9 @@ document.addEventListener('click', async e => {
     lsSet('anthropicKey', v); toast('Key saved in this browser.'); return go('settings');
   }
   if (act === 'clearkey') { lsSet('anthropicKey', ''); toast('Key removed.'); return go('settings'); }
+
+  const th = t.closest('[data-settheme]');
+  if (th) { lsSet('theme', th.dataset.settheme); applyTheme(); return go(currentView()); }
 });
 
 document.addEventListener('submit', e => {
@@ -1491,7 +1752,11 @@ document.addEventListener('submit', e => {
       USER.step = 'subtopics';
     } else if (next === 'pairs') {
       if (!vals.length) return toast('Pick at least one subtopic.');
-      USER.subtopics = vals; USER.step = 'pairs';
+      // Keep the reader's interest order; `vals` is DOM order and would silently undo it.
+      const on = new Set(vals);
+      USER.subtopics = [...USER.subtopics.filter(k => on.has(k)),
+                        ...vals.filter(k => !USER.subtopics.includes(k))];
+      USER.step = 'pairs';
     } else if (next === 'ready') {
       if (!vals.length) return toast('Pick at least one journal.');
       USER.journals = vals; USER.step = 'ready'; saveUser();
@@ -1538,6 +1803,7 @@ document.addEventListener('change', async e => {
 /* -------------------------------------------------------------------- boot */
 
 (async function boot() {
+  applyTheme();          // before first paint, so there's no flash of the wrong palette
   try {
     DATA = window.__YJ_DATA__;
   } catch (e) {
