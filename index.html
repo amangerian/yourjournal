@@ -307,23 +307,40 @@ font:11px ui-sans-serif,system-ui;padding:.2rem .5rem;cursor:pointer;transition:
 .story .fav{margin-left:.25rem}
 .story .fav.on{color:var(--star)}
 
-/* ---- subtopic interest ranking ------------------------------------------- */
+/* ---- subtopic interest tiers --------------------------------------------- */
 .rankbox{background:var(--hi);border:1px solid var(--line);border-radius:10px;
 padding:.85rem 1rem;margin:0 0 1.4rem}
 .rankhead{display:flex;gap:.6rem;align-items:baseline;flex-wrap:wrap;
 font:13px ui-sans-serif,system-ui}
 .rankhead .hint{color:var(--mut);font-size:12px}
+.tgrp{margin-top:.9rem}
+.thead{display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap;
+font:13px ui-sans-serif,system-ui;padding-left:.15rem}
+.thead .hint{color:var(--mut);font-size:12px}
+.thead .tw{color:var(--mut);font-size:11px;font-variant-numeric:tabular-nums}
+/* A left rule shows three buckets as three bands without three background colours
+   fighting the card palette underneath. */
+.tgrp .ranklist{border-left:2px solid var(--line);padding-left:.5rem;margin-top:.35rem}
+.tgrp.t-core .ranklist{border-left-color:var(--acc)}
 .ranklist{list-style:none;margin:.7rem 0 0;padding:0;display:flex;flex-direction:column;gap:.18rem}
 .ranklist li{display:flex;gap:.55rem;align-items:center;background:var(--card);
 border:1px solid var(--line);border-radius:7px;padding:.3rem .55rem;
 font:13px ui-sans-serif,system-ui}
-.ranklist .pos{flex:0 0 1.4rem;color:var(--mut);font-variant-numeric:tabular-nums;font-size:12px}
 .ranklist .rname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ranklist .rw{color:var(--mut);font-size:11px;font-variant-numeric:tabular-nums}
-.ranklist .rbtns{display:flex;gap:.1rem;flex:0 0 auto}
 .ranklist .linkbtn{padding:.1rem .3rem;font-size:12px}
-.ranklist .linkbtn[disabled]{opacity:.25;cursor:default}
 .ranklist .linkbtn.drop:hover{color:var(--dn)}
+/* Segmented control: all three states always visible, so setting a tier is one click and
+   the current one is readable without a legend. */
+.tset{display:flex;flex:0 0 auto;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.tset .tbtn{background:none;border:0;border-right:1px solid var(--line);cursor:pointer;
+color:var(--mut);padding:.18rem .45rem;font:11px ui-sans-serif,system-ui;white-space:nowrap}
+.tset .tbtn:last-child{border-right:0}
+.tset .tbtn:hover{background:var(--hi);color:var(--fg)}
+.tset .tbtn.on{background:var(--acc);color:var(--bg);font-weight:600}
+@media(max-width:560px){
+  .ranklist li{flex-wrap:wrap}
+  .ranklist .rname{flex:1 0 100%}
+}
 
 /* ---- theme picker -------------------------------------------------------- */
 .themes{display:grid;grid-template-columns:repeat(auto-fill,minmax(11rem,1fr));gap:.5rem;
@@ -447,7 +464,7 @@ function newProfile(name) {
   const uid = profiles.some(p => p.id === id) ? id + '-' + Math.random().toString(36).slice(2, 6) : id;
   const u = {
     id: uid, name: name || 'Reader', created: new Date().toISOString(),
-    step: 'specialties', specialties: [], subtopics: [], axisScores: {},
+    step: 'specialties', specialties: [], subtopics: [], tiers: {}, axisScores: {},
     journals: [], feedback: {}, library: {}, favorites: {}, weights: {}, seen: [], run: null,
   };
   profiles.push({ id: uid, name: u.name });
@@ -463,6 +480,16 @@ function loadProfile(id) {
   if (!u.favorites) u.favorites = {};        // profiles created before favorites existed
   // Profiles from before axis learning: their answers become the prior they always were.
   if (!u.axisPrior && u.axisScores) u.axisPrior = { ...u.axisScores };
+  /* Profiles from before interest tiers carry an ordered subtopic list. Splitting it in
+     thirds is the closest honest reading of what that order meant, and it keeps a returning
+     reader's top interests on top rather than flattening everyone to Interested. */
+  if (!u.tiers && Array.isArray(u.subtopics)) {
+    u.tiers = {};
+    const cut = Math.ceil(u.subtopics.length / 3);
+    u.subtopics.forEach((k, i) => {
+      u.tiers[k] = i < cut ? 'core' : i < cut * 2 ? 'interested' : 'occasional';
+    });
+  }
   return u;
 }
 function saveUser() { lsSet('u:' + USER.id, USER); }
@@ -568,27 +595,62 @@ function termsOf(text) {
   return out;
 }
 
-const subtopicIndex = () => {
+/* DATA never changes for the life of the page, so build this once. subtopicOf() calls it
+   per article and the feed calls subtopicOf() several times per article — rebuilding a
+   255-entry Map a few hundred times a render was pure waste. */
+let _subIdx = null;
+const subtopicIndex = () => _subIdx || (_subIdx = (() => {
   const m = new Map();
   for (const s of DATA.taxonomy.specialties) for (const st of s.subtopics) m.set(s.id + ':' + st.id, [s, st]);
   return m;
+})());
+
+/* Interest tiers, replacing the old most-interesting-first ordering of USER.subtopics.
+   A total order was the wrong instrument for twenty-odd items: moving one from #18 to #2
+   was sixteen clicks of ▲, so nobody would ever maintain it — and because the ramp was
+   index-based, adding a single subtopic silently reweighted every other one. Three buckets
+   are one click each, order within a bucket carries no meaning, and what a subtopic is
+   worth no longer depends on how many others happen to sit beside it.
+
+   Core does two things: a heavier weight here, and a guaranteed slot in the issue over in
+   topPicks(). The second is the one that matters — a weight can tilt a close call but it
+   cannot stop a big-literature topic from taking the whole page.
+
+   A term shared by several subtopics keeps the best (highest) weight of them. */
+const TIERS = [
+  ['core',       'Core',       1.60, 'Most of what I want to read'],
+  ['interested', 'Interested', 1.00, 'Happy to see these'],
+  ['occasional', 'Occasional', 0.55, 'Only when it is good'],
+];
+const TIER_W = Object.fromEntries(TIERS.map(([k, , w]) => [k, w]));
+const DEFAULT_TIER = 'interested';
+
+const tierOf = (u, key) => {
+  const t = (u.tiers || {})[key];
+  return TIER_W[t] === undefined ? DEFAULT_TIER : t;
 };
 
-/* USER.subtopics is stored most-interesting-first, so a subtopic's rank is its index.
-   The ramp is deliberately gentle: rank should tilt a close call, not let #1 bury #12.
-   A term shared by several subtopics keeps the best (highest) weight of them. */
-const RANK_TOP = 1.35, RANK_BOTTOM = 0.75;
-
-function rankWeights(u) {
-  const n = u.subtopics.length, m = new Map();
-  u.subtopics.forEach((k, i) =>
-    m.set(k, n < 2 ? 1 : RANK_TOP - (RANK_TOP - RANK_BOTTOM) * (i / (n - 1))));
+function tierWeights(u) {
+  const m = new Map();
+  for (const k of u.subtopics) m.set(k, TIER_W[tierOf(u, k)]);
   return m;
+}
+
+/* The reader's subtopics grouped by tier, in tier order. Also the order the feed walks
+   when deciding which interests get a guaranteed slot. */
+const byTier = u => TIERS.map(([tier, label, w, blurb]) =>
+  ({ tier, label, w, blurb, keys: u.subtopics.filter(k => tierOf(u, k) === tier) }));
+
+// Tiers are keyed by subtopic, so dropping a specialty can strand entries behind.
+function pruneTiers(u) {
+  if (!u.tiers) return;
+  const on = new Set(u.subtopics);
+  for (const k of Object.keys(u.tiers)) if (!on.has(k)) delete u.tiers[k];
 }
 
 function userTerms(u) {
   const idx = subtopicIndex(), counts = new Map(), best = new Map();
-  const rw = rankWeights(u);
+  const rw = tierWeights(u);
   for (const key of u.subtopics) {
     const pair = idx.get(key);
     if (!pair) continue;
@@ -615,7 +677,45 @@ function axisSignal(hay, ax) {
   return lo + hi === 0 ? 0 : (hi - lo) / (lo + hi);
 }
 
-function scoreArticle(a, u, terms, priors) {
+/* Absent evidence is not negative evidence — and the original formula scored it as such.
+   `learned` is 0 for every article a reader sees before they have rated anything: not
+   because the model dislikes those articles, but because it has nothing to say about them.
+   Leaving that 0.16 in the divisor makes the top of the scale unreachable. Measured over a
+   real 165-article week for a brand-new reader, the best paper in the issue scored 72 and
+   nothing above 72 could exist — which reads as "it didn't find me anything good" when in
+   fact it had found exactly what was asked for.
+
+   So a channel only takes up its share of the scale once it has something to say. The
+   divisor is the best score actually attainable given the channels this reader has, which
+   is what "predicted interest, 0-100" claims to mean. Within one issue it is a constant,
+   so the ordering is untouched: this changes what the number says, not who wins.
+
+   The axis channel is not treated this way. Its 0 means "no signal fired in this article",
+   which is genuinely neutral rather than absent — an article that pushes on no axis should
+   not outscore one that pushes the reader's way. Only the reader having no axis
+   preferences at all makes the channel dead, and that is what scoreScale() tests. */
+const W_TOPIC = 0.52, W_JOURNAL = 0.14, W_AXIS_UP = 0.18, W_AXIS_DN = 0.10, W_LEARNED = 0.16;
+
+/* The learned channel eases in rather than switching on, and the same fraction governs both
+   its contribution and its share of the divisor. Switching it on at the first rating deflated
+   every score in the next issue by about a sixth overnight — the reader rates one paper and
+   is told the whole week got worse. Easing spreads that over the first dozen ratings, which
+   is also the honest shape: one thumb is not the same evidence as thirty.
+   Mirrors AXIS_LEARN_K, which does the same thing for the axes. */
+const LEARN_LIVE_K = 12;   // ratings at which the learned channel carries half its weight
+
+function scoreScale(u, priors) {
+  const axis = Object.values(u.axisScores || {}).some(v => Math.abs(v) >= 0.05);
+  const rated = Object.values(u.feedback || {}).filter(r => VERDICT_W[r.verdict]).length;
+  const learned = Object.keys(u.weights || {}).length ? rated / (rated + LEARN_LIVE_K) : 0;
+  // The best prior among journals *this* reader chose, so their ceiling is one they can hit.
+  const jps = Object.values(priors || {});
+  const maxJp = jps.length ? Math.max(...jps) : 0.9;
+  return { axis, learned,
+    max: W_TOPIC + W_JOURNAL * maxJp + (axis ? W_AXIS_UP : 0) + W_LEARNED * learned };
+}
+
+function scoreArticle(a, u, terms, priors, scale = scoreScale(u, priors)) {
   const text = [a.title, a.abstract, (a.keywords || []).join(' '), (a.mesh || []).join(' '),
     (a.pubtypes || []).join(' ')].join(' ');
   const hay = ' ' + text.toLowerCase().replace(/\s+/g, ' ') + ' ';
@@ -659,9 +759,9 @@ function scoreArticle(a, u, terms, priors) {
   for (const t of seen) learnedRaw += u.weights[t] || 0;
   const learned = Math.tanh(learnedRaw / 4);
 
-  let base = 0.52 * topic + 0.14 * jp
-    + 0.18 * Math.max(0, axis) + 0.10 * Math.min(0, axis)
-    + 0.16 * Math.max(0, learned) + 0.16 * Math.min(0, learned);
+  let base = (W_TOPIC * topic + W_JOURNAL * jp
+    + W_AXIS_UP * Math.max(0, axis) + W_AXIS_DN * Math.min(0, axis)
+    + W_LEARNED * scale.learned * learned) / scale.max;
 
   const pt = (a.pubtypes || []).join(' ').toLowerCase();
   if (/editorial|comment|news/.test(pt)) base *= 0.55;
@@ -997,16 +1097,19 @@ async function runScan(u, days, onProgress) {
   const names = {};
   for (const a of u.journals) names[a.toLowerCase()] = (DATA.journals.journals[a] || {}).name || a;
 
+  // One scale for the whole issue, so every article in it is scored on the same ruler.
+  const scale = scoreScale(u, priors);
   for (const a of arts) {
     a.journalName = names[(a.journal || '').toLowerCase()] || a.journal;
-    const { score, why } = scoreArticle(a, u, terms, priors);
+    const { score, why } = scoreArticle(a, u, terms, priors, scale);
     a.score = score; a.why = why;
   }
   arts.sort((x, y) => y.score - x.score);
 
   u.seen = [...new Set([...u.seen, ...arts.map(a => a.pmid)])].slice(-6000);
   return { articles: arts, since: fmt(since), until: fmt(until), total: ids.length,
-           generated: new Date().toISOString(), journals: u.journals.length };
+           generated: new Date().toISOString(), journals: u.journals.length,
+           scaleMax: scale.max };
 }
 
 /* ---------------------------------------------------- optional Claude rerank */
@@ -1300,40 +1403,45 @@ function viewSpecialties() {
       ${chosen.size ? '' : 'disabled'}>Continue with ${chosen.size} →</button></div></form>`);
 }
 
-/* The chosen subtopics, in interest order, with move controls. Lives above the grid and
-   re-renders in place on every toggle — a separate ranking step would be one screen too
-   many, and ordering only makes sense while you can still see what you picked. */
-function rankPanel() {
+/* The chosen subtopics bucketed by interest tier, each row carrying its own tier control.
+   Lives above the grid and re-renders in place on every toggle — a separate ranking step
+   would be one screen too many, and tiering only makes sense while you can still see
+   what you picked. */
+function tierPanel() {
   const idx = subtopicIndex();
-  const rw = rankWeights(USER);
-  const rows = USER.subtopics.map((key, i) => {
-    const st = (idx.get(key) || [null, null])[1];
-    if (!st) return '';
-    const w = rw.get(key) ?? 1;
-    return `<li data-rank="${esc(key)}">
-      <span class="pos">${i + 1}</span>
-      <span class="rname">${esc(st.name)}</span>
-      <span class="rw" title="Weight applied to this subtopic's keywords">×${w.toFixed(2)}</span>
-      <span class="rbtns">
-        <button type="button" class="linkbtn" data-move="up" ${i === 0 ? 'disabled' : ''}
-          title="More interesting">▲</button>
-        <button type="button" class="linkbtn" data-move="down"
-          ${i === USER.subtopics.length - 1 ? 'disabled' : ''} title="Less interesting">▼</button>
-        <button type="button" class="linkbtn drop" data-move="off" title="Remove">✕</button>
-      </span></li>`;
+  const groups = byTier(USER).map(g => {
+    if (!g.keys.length) return '';
+    const rows = g.keys.map(key => {
+      const st = (idx.get(key) || [null, null])[1];
+      if (!st) return '';
+      const btns = TIERS.map(([k, label]) =>
+        `<button type="button" class="tbtn ${k === g.tier ? 'on' : ''}" data-settier="${k}"
+          data-key="${esc(key)}">${esc(label)}</button>`).join('');
+      return `<li>
+        <span class="rname">${esc(st.name)}</span>
+        <span class="tset">${btns}</span>
+        <button type="button" class="linkbtn drop" data-settier="off" data-key="${esc(key)}"
+          title="Remove">✕</button></li>`;
+    }).join('');
+    return `<div class="tgrp t-${g.tier}">
+      <div class="thead"><b>${esc(g.label)} · ${g.keys.length}</b>
+        <span class="tw" title="Weight applied to this tier's keywords">×${g.w.toFixed(2)}</span>
+        <span class="hint">${esc(g.blurb)}${g.tier === 'core'
+          ? ' — and a guaranteed slot in every issue' : ''}</span></div>
+      <ul class="ranklist">${rows}</ul></div>`;
   }).join('');
 
   return `<div class="rankbox" id="rankbox">
-    <div class="rankhead"><b>Your picks, most interesting first</b>
+    <div class="rankhead"><b>Your picks</b>
       <span class="hint">${USER.subtopics.length
-        ? 'Order matters — the top ones get more weight. Leave it alone for equal footing.'
+        ? 'Everything starts at Interested. Promote the few you would always read to Core.'
         : 'Nothing picked yet. Tap tiles below.'}</span></div>
-    ${USER.subtopics.length ? `<ol class="ranklist">${rows}</ol>` : ''}</div>`;
+    ${groups}</div>`;
 }
 
-function refreshRankPanel(form) {
+function refreshTierPanel(form) {
   const box = form?.querySelector('#rankbox');
-  if (box) box.outerHTML = rankPanel();
+  if (box) box.outerHTML = tierPanel();
 }
 
 function countBtn(form) {
@@ -1363,8 +1471,10 @@ function viewSubtopics() {
   render('onboard', stepsBar('subtopics') + `<h1>Narrow it down</h1>
     <div class="sub"><b>Pick as many as you like — tap to toggle, they stay selected.</b>
     These supply the vocabulary your ranking is built from; about 4,500 keywords sit behind these
-    tiles. Anywhere from 5 to 30 works well, and you can change them later.</div>
-    <form id="multi" data-next="pairs">${rankPanel()}${groups}
+    tiles. Anywhere from 5 to 30 works well, and you can change them later.
+    Sort them into <b>Core / Interested / Occasional</b> in the panel below — Core topics
+    get more weight <i>and</i> are guaranteed a place in every issue.</div>
+    <form id="multi" data-next="pairs">${tierPanel()}${groups}
     <div class="row sticky-row"><button class="btn" type="submit" data-count="Continue with {n} →"
       ${chosen.size ? '' : 'disabled'}>Continue with ${chosen.size} →</button>
     <button class="btn ghost" type="button" data-goto="specialties">← Back</button></div></form>`);
@@ -1534,7 +1644,11 @@ function viewFeed() {
   // A month-long first issue has far more to choose from, so show a deeper runners-up list.
   const span = spanDays(run);
   const deep = span > 10;
-  const top = arts.slice(0, 12), more = arts.slice(12, deep ? 40 : 27);
+  // Derived by exclusion rather than by index, because topPicks() may have seated an
+  // article from further down the list — it must not then appear again as a runner-up.
+  const top = topPicks(arts, 12);
+  const inTop = new Set(top.map(a => a.pmid));
+  const more = arts.filter(a => !inTop.has(a.pmid)).slice(0, deep ? 28 : 15);
   const hasKey = !!lsGet('anthropicKey', '');
   render('feed', toReadLaterStrip() + `<h1>${deep ? 'Your first issue' : 'This week'}</h1>
     <div class="sub">${run.since} → ${run.until}${deep ? ` · the past ${Math.round(span)} days` : ''} ·
@@ -1555,8 +1669,8 @@ function viewFeed() {
         starved.map(s => `<div class="starved"><span class="slabel">${esc(s.name)}</span>
           ${articleCard(s.article, '·', { noMeter: true })}</div>`).join('');
     })()}
-    ${more.length ? `<h2>Also worth a look · 13–${12 + more.length}</h2>
-      ${more.map((a, i) => articleCard(a, i + 13)).join('')}` : ''}
+    ${more.length ? `<h2>Also worth a look · ${top.length + 1}–${top.length + more.length}</h2>
+      ${more.map((a, i) => articleCard(a, i + top.length + 1)).join('')}` : ''}
     <div class="note"><b>👍👍 very interested · 👍 interested · 👎 not interested</b> teaches your
     formula — a double thumbs-up counts twice. <b>📖 Read later</b> shelves an article without
     changing your ranking. <a data-view="how">How this works →</a></div>`);
@@ -1577,19 +1691,26 @@ function firstSentences(text, n = 2, cap = 340) {
    belongs to the subtopic whose keywords it matches most. */
 /* Which of the reader's own subtopics does this article belong to? Returns the key so
    callers can group by it; sectionFor() keeps the name-only shape The Paper expects. */
+/* Attribution is tier-weighted, not a raw count of matched terms. Subtopic vocabularies
+   overlap heavily — "suicidal ideation" sits in both Suicide prevention and Depression —
+   so a broad subtopic with a large term list wins a straight count almost every time. That
+   quietly defeats the Core quota downstream, which can only seat a topic that some article
+   was attributed to. Weighting by tier means that when two of the reader's subtopics both
+   fit, the one they said they cared more about gets the article. */
 function subtopicOf(a) {
   const idx = subtopicIndex();
   const matched = new Set((a.why?.matched || []).map(t => t.toLowerCase()));
   if (!matched.size) return null;
-  let bestKey = null, bestName = null, bestN = 0;
+  let bestKey = null, bestName = null, best = 0;
   for (const key of USER.subtopics) {
     const pair = idx.get(key);
     if (!pair) continue;
     let n = 0;
     for (const t of pair[1].terms) if (matched.has(t.toLowerCase())) n++;
-    if (n > bestN) { bestN = n; bestKey = key; bestName = pair[1].name; }
+    const w = n * TIER_W[tierOf(USER, key)];
+    if (w > best) { best = w; bestKey = key; bestName = pair[1].name; }
   }
-  return bestN ? { key: bestKey, name: bestName } : null;
+  return best ? { key: bestKey, name: bestName } : null;
 }
 
 const sectionFor = a => (subtopicOf(a) || {}).name || null;
@@ -1598,15 +1719,65 @@ const sectionFor = a => (subtopicOf(a) || {}).name || null;
    chosen subtopics took 37 of the top 40 while computational psychiatry got one paper. That
    reads as "it doesn't know what I asked for."
 
-   Rather than reshuffle the ranking — which would put the scores out of order and look
-   broken — surface the best unshown article from each starved subtopic separately. The
-   ranking stays honest and nothing a reader asked for silently disappears. */
+   A heavier tier weight cannot fix this on its own — it tilts a close call, but a topic with
+   ten times the publishing volume still wins on sheer count. So Core carries an actual
+   guarantee: one seat in the top list whenever the topic has anything worth showing.
+
+   Bounded and floored, because a guarantee that seats anything is worse than none. At most
+   a third of the list can be promoted, and never an article scoring below PROMO_FLOOR of the
+   one it displaces. Room is made from the bottom, skipping any article that is the last
+   representative of a Core subtopic — evicting one Core topic to seat another is churn. */
+const PROMO_FLOOR = 0.55;
+
+function topPicks(articles, n = 12) {
+  const list = articles.slice(0, n);
+  const core = byTier(USER)[0].keys;
+  if (!core.length || articles.length <= n) return list;
+
+  const keyOf = a => (subtopicOf(a) || {}).key || null;
+  const inList = new Set(list.map(a => a.pmid));
+  const held = new Map();                        // core subtopic -> seats it currently holds
+  for (const a of list) {
+    const k = keyOf(a);
+    if (k && core.includes(k)) held.set(k, (held.get(k) || 0) + 1);
+  }
+
+  const floor = finalScore(list[list.length - 1]) * PROMO_FLOOR;
+  const room = Math.floor(n / 3);
+  const promos = [];
+  for (const key of core) {
+    if (held.has(key) || promos.length >= room) continue;
+    const best = articles.find(a =>
+      !inList.has(a.pmid) && finalScore(a) >= floor && keyOf(a) === key);
+    if (best) { promos.push(best); inList.add(best.pmid); held.set(key, 1); }
+  }
+  if (!promos.length) return list;
+
+  let drop = promos.length;
+  const kept = [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const a = list[i], k = keyOf(a);
+    if (drop && !(k && held.get(k) === 1)) {
+      drop--;
+      if (k && held.has(k)) held.set(k, held.get(k) - 1);
+      continue;
+    }
+    kept.unshift(a);
+  }
+  // Still ordered high-to-low: a promoted article is seated, not given a score it didn't earn.
+  return [...kept, ...promos].sort((x, y) => finalScore(y) - finalScore(x));
+}
+
+/* Everything the quota could not seat — non-Core topics, and Core ones whose best article
+   fell under the floor. Rather than reshuffle the ranking, which would put the scores out
+   of order and look broken, surface the best unshown article from each starved subtopic
+   separately. The ranking stays honest and nothing a reader asked for silently disappears. */
 function starvedPicks(articles, shown, limit = 6) {
   const seen = new Set(shown.map(a => a.pmid));
   const covered = new Set(shown.map(a => (subtopicOf(a) || {}).key).filter(Boolean));
   const idx = subtopicIndex();
   const out = [];
-  for (const key of USER.subtopics) {            // in the reader's own interest order
+  for (const g of byTier(USER)) for (const key of g.keys) {   // Core first, Occasional last
     if (covered.has(key) || out.length >= limit) continue;
     const best = articles.find(a => !seen.has(a.pmid) && (subtopicOf(a) || {}).key === key);
     if (best) out.push({ article: best, name: (idx.get(key) || [null, {}])[1].name || key });
@@ -1719,7 +1890,10 @@ function viewFavorites() {
 
 function viewSettings() {
   const idx = subtopicIndex();
-  const subs = USER.subtopics.map(k => (idx.get(k) || [null, {}])[1].name).filter(Boolean);
+  const nameOf = k => (idx.get(k) || [null, {}])[1].name || k;
+  const tierRows = byTier(USER).filter(g => g.keys.length).map(g =>
+    `<div><b>${esc(g.label)}</b> <span class="chip">×${g.w.toFixed(2)}</span>
+      ${g.keys.map(k => esc(nameOf(k))).join(' · ')}</div>`).join('');
   const ev = USER.axisEvidence || {}, prior = USER.axisPrior || {};
   const axRows = Object.entries(USER.axisScores).map(([id, v]) => {
     const ax = DATA.axes.axes.find(a => a.id === id);
@@ -1748,9 +1922,10 @@ function viewSettings() {
   render('settings', `<h1>Your formula</h1>
     <div class="sub">Everything here is editable. Changes apply from your next issue.
     <a data-view="how">How it all works →</a></div>
-    <h2>Topics · most interesting first</h2>
-      <div class="sub">${subs.map((s, i) => `${i + 1}. ${esc(s)}`).join(' · ') || 'none'} ·
-      <a data-goto="subtopics">change or reorder</a></div>
+    <h2>Topics · by interest tier</h2>
+      <div class="sub">${tierRows || 'none'}
+      <div style="margin-top:.5rem">Core topics carry more weight and are guaranteed a slot
+      in every issue. <a data-goto="subtopics">change or re-tier</a></div></div>
     <h2>Appearance</h2>
       <div class="sub">Applies to this browser, for every profile on it.</div>
       ${themePicker()}
@@ -1824,7 +1999,7 @@ function viewBuilding(msg) {
     <div class="waitgrid">
       <div class="waitcard"><div class="wn">Your topics</div>
         <p>${subs.length ? esc(subs.slice(0, 8).join(' · ')) + (subs.length > 8 ? ' …' : '') : '—'}</p>
-        <p class="hint">In your interest order. The ones at the top carry more weight.</p></div>
+        <p class="hint">Core topics carry more weight and hold a slot in every issue.</p></div>
       <div class="waitcard"><div class="wn">Your reading style</div>
         <p>${strong.length ? esc(strong.join(' · ')) : 'No strong leanings yet — your thumbs will fill this in.'}</p>
         <p class="hint">From the six questions. Every 👍 and 👎 refines it from here.</p></div>
@@ -1938,10 +2113,12 @@ document.addEventListener('click', async e => {
     if (form?.dataset.next === 'pairs') {
       const keys = [...grp.querySelectorAll('.pick.multi')].map(p => p.dataset.val);
       const set = new Set(keys);
-      USER.subtopics = selAll
-        ? [...USER.subtopics, ...keys.filter(k => !USER.subtopics.includes(k))]
-        : USER.subtopics.filter(k => !set.has(k));
-      refreshRankPanel(form);
+      if (selAll) USER.subtopics = [...USER.subtopics, ...keys.filter(k => !USER.subtopics.includes(k))];
+      else {
+        USER.subtopics = USER.subtopics.filter(k => !set.has(k));
+        if (USER.tiers) for (const k of keys) delete USER.tiers[k];
+      }
+      refreshTierPanel(form);
     }
     countBtn(form);
     return;
@@ -1972,14 +2149,17 @@ document.addEventListener('click', async e => {
   if (multi) {
     multi.classList.toggle('on');
     const form = multi.closest('form');
-    // On the subtopics screen selection order IS the interest ranking, so track it live:
-    // newly picked goes to the bottom, and the panel above re-renders in place.
+    // On the subtopics screen the panel above tracks the selection live. A new pick lands
+    // in the default tier; deselecting drops its tier too, so nothing stale is kept.
     if (form?.dataset.next === 'pairs') {
       const key = multi.dataset.val;
-      USER.subtopics = multi.classList.contains('on')
-        ? [...USER.subtopics.filter(k => k !== key), key]
-        : USER.subtopics.filter(k => k !== key);
-      refreshRankPanel(form);
+      if (multi.classList.contains('on')) {
+        if (!USER.subtopics.includes(key)) USER.subtopics.push(key);
+      } else {
+        USER.subtopics = USER.subtopics.filter(k => k !== key);
+        if (USER.tiers) delete USER.tiers[key];
+      }
+      refreshTierPanel(form);
     }
     countBtn(form);
     return;
@@ -2010,23 +2190,20 @@ document.addEventListener('click', async e => {
     return;
   }
 
-  const mv = t.closest('[data-move]');
-  if (mv) {
-    const li = mv.closest('[data-rank]'), key = li.dataset.rank;
-    const i = USER.subtopics.indexOf(key);
-    if (i < 0) return;
-    const dir = mv.dataset.move;
-    if (dir === 'off') {
-      USER.subtopics.splice(i, 1);
+  const tb = t.closest('[data-settier]');
+  if (tb) {
+    const key = tb.dataset.key, to = tb.dataset.settier;
+    USER.tiers = USER.tiers || {};
+    if (to === 'off') {
+      USER.subtopics = USER.subtopics.filter(k => k !== key);
+      delete USER.tiers[key];
       const tile = document.querySelector(`.pick.multi[data-val="${CSS.escape(key)}"]`);
       if (tile) tile.classList.remove('on');
-    } else {
-      const j = dir === 'up' ? i - 1 : i + 1;
-      if (j < 0 || j >= USER.subtopics.length) return;
-      [USER.subtopics[i], USER.subtopics[j]] = [USER.subtopics[j], USER.subtopics[i]];
-    }
+    } else if (TIER_W[to] !== undefined) {
+      USER.tiers[key] = to;
+    } else return;
     const form = document.getElementById('multi');
-    refreshRankPanel(form);
+    refreshTierPanel(form);
     countBtn(form);
     return;
   }
@@ -2054,8 +2231,13 @@ document.addEventListener('click', async e => {
     w.closest('.card')?.classList.toggle('dis', v === 'dislike');
     const a = findArticle(pmid);
     if (v) {
+      /* predScale records the divisor in force when this prediction was made. The pool
+         calibration() draws on already spans more than one scale — a Claude-reranked
+         issue writes Claude's 0-100 into the same field — so this is not corrected here;
+         it is recorded so that it can be. */
       USER.feedback[pmid] = { verdict: v, ts: new Date().toISOString(), title: a.title,
         journal: a.journalName || a.journal, predicted: finalScore(a),
+        predScale: USER.run?.scaleMax,
         text: [a.title, a.abstract, (a.keywords || []).join(' '), (a.mesh || []).join(' ')].join(' ') };
     } else delete USER.feedback[pmid];
     relearn(USER); saveUser();
@@ -2118,13 +2300,13 @@ document.addEventListener('submit', e => {
         if (s) for (const st of s.subtopics) valid.add(sid + ':' + st.id);
       }
       USER.subtopics = USER.subtopics.filter(k => valid.has(k));
+      pruneTiers(USER);
       USER.step = 'subtopics';
     } else if (next === 'pairs') {
       if (!vals.length) return toast('Pick at least one subtopic.');
-      // Keep the reader's interest order; `vals` is DOM order and would silently undo it.
-      const on = new Set(vals);
-      USER.subtopics = [...USER.subtopics.filter(k => on.has(k)),
-                        ...vals.filter(k => !USER.subtopics.includes(k))];
+      // Order no longer carries meaning — interest lives in USER.tiers — so DOM order is fine.
+      USER.subtopics = vals;
+      pruneTiers(USER);
       USER.step = 'pairs';
     } else if (next === 'ready') {
       if (!vals.length) return toast('Pick at least one journal.');
