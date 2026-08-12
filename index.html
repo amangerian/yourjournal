@@ -80,19 +80,30 @@ font:inherit;color:inherit;width:100%}
 .pick.on .ct{color:var(--up)}
 .grp{margin-bottom:1.8rem}
 .grp h3{font:600 13px ui-sans-serif,system-ui;margin:0 0 .6rem;color:var(--fg)}
-.pair{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:1.2rem;
-margin-bottom:1rem}
-.pair .ax{font:10px ui-sans-serif,system-ui;letter-spacing:.09em;text-transform:uppercase;
-color:var(--mut);margin-bottom:.7rem}
-.pair .opts{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
-.pair button{font:inherit;font-size:.95rem;line-height:1.45;background:var(--bg);color:var(--fg);
-border:1px solid var(--line);border-radius:9px;padding:.9rem 1rem;cursor:pointer;text-align:left;
+.pair{background:var(--card);border:1px solid var(--line);border-radius:12px;
+padding:.85rem 1rem .7rem;margin-bottom:.7rem;transition:border-color .12s}
+/* Answered cards recede, so what is left to do is what stands out. */
+.pair.answered{border-color:var(--up);background:var(--hi)}
+.pair .ax{display:flex;align-items:center;gap:.5rem;
+font:10px ui-sans-serif,system-ui;letter-spacing:.09em;text-transform:uppercase;
+color:var(--mut);margin-bottom:.55rem}
+.pair .qn{display:inline-grid;place-items:center;width:1.15rem;height:1.15rem;flex:0 0 auto;
+border:1px solid var(--line);border-radius:50%;font-size:9px;letter-spacing:0}
+.pair.answered .qn{border-color:var(--up);color:var(--up)}
+.pair .opts{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+.pair button{font:inherit;font-size:.92rem;line-height:1.4;background:var(--bg);color:var(--fg);
+border:1px solid var(--line);border-radius:9px;padding:.7rem .85rem;cursor:pointer;text-align:left;
 transition:all .12s}
 .pair button:hover{border-color:var(--acc)}
 .pair button.on{border-color:var(--up);background:var(--upbg)}
-.pair .skip{display:flex;gap:.5rem;margin-top:.6rem}
-.pair .skip button{flex:1;text-align:center;font:12px ui-sans-serif,system-ui;padding:.45rem;
-color:var(--mut)}
+/* One pill, centred — not two full-width buttons competing with the real choice above. */
+.pair .skip{display:flex;justify-content:center;margin-top:.45rem}
+.pair .skip button{flex:0 0 auto;text-align:center;font:12px ui-sans-serif,system-ui;
+padding:.25rem .8rem;border-radius:999px;border-color:transparent;background:none;color:var(--mut)}
+.pair .skip button:hover{border-color:var(--line);color:var(--fg)}
+.pair .skip button.on{border-color:var(--up);background:var(--upbg);color:var(--fg)}
+.pairprog{flex:1;min-width:4rem;height:4px;border-radius:3px;background:var(--line);overflow:hidden}
+.pairprog i{display:block;height:100%;background:var(--up);width:0;transition:width .18s}
 @media(max-width:620px){.pair .opts{grid-template-columns:1fr}}
 
 /* article cards */
@@ -342,6 +353,24 @@ color:var(--mut);padding:.18rem .45rem;font:11px ui-sans-serif,system-ui;white-s
   .ranklist .rname{flex:1 0 100%}
 }
 
+/* ---- past issues --------------------------------------------------------- */
+.isslist{list-style:none;margin:1rem 0 0;padding:0;display:flex;flex-direction:column;gap:.4rem}
+.issrow{display:grid;grid-template-columns:auto 1fr auto auto;gap:.5rem 1rem;align-items:baseline;
+background:var(--card);border:1px solid var(--line);border-radius:9px;padding:.7rem .9rem;
+font:13px ui-sans-serif,system-ui}
+.issrow[data-openissue]{cursor:pointer}
+.issrow[data-openissue]:hover{border-color:var(--acc)}
+.isdate{font-variant-numeric:tabular-nums;color:var(--fg);white-space:nowrap}
+/* The lead title is the only part that says what the issue *was*, so it gets the free space
+   and is the thing that truncates rather than wraps the row into three lines. */
+.islead{color:var(--mut);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ismeta{color:var(--mut);font-size:12px;white-space:nowrap}
+.isgo{color:var(--acc);font-size:12px;white-space:nowrap}
+@media(max-width:680px){
+  .issrow{grid-template-columns:1fr auto}
+  .islead{grid-column:1/-1;white-space:normal}
+}
+
 /* ---- theme picker -------------------------------------------------------- */
 .themes{display:grid;grid-template-columns:repeat(auto-fill,minmax(11rem,1fr));gap:.5rem;
 margin:.6rem 0 1rem}
@@ -455,6 +484,7 @@ let USER = null;
 
 const lsGet = (k, d) => { try { const v = localStorage.getItem(STORE + k); return v ? JSON.parse(v) : d; } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(STORE + k, JSON.stringify(v)); } catch (e) { toast('Storage full — export your profile.'); } };
+const lsDel = k => { try { localStorage.removeItem(STORE + k); } catch (e) { /* nothing to undo */ } };
 
 function listProfiles() { return lsGet('profiles', []); }
 
@@ -527,10 +557,23 @@ const DAY = 864e5;
 const EXPORT_EVERY = 7 * DAY;   // remind once a week
 const SNOOZE_FOR = 3 * DAY;     // "not now" buys three days, not silence
 
+/* Archived issues live under their own keys, so a plain dump of USER would quietly leave
+   them behind — and the export banner promises a backup. They ride along under _archive and
+   are unpacked back into their own keys on import, so the on-disk split is invisible here. */
+function exportPayload() {
+  const index = archIndex(USER.id);
+  const issues = {};
+  for (const m of index) {
+    const arts = loadIssue(USER.id, m.id);
+    if (arts) issues[m.id] = arts;
+  }
+  return index.length ? { ...USER, _archive: { index, issues } } : { ...USER };
+}
+
 function exportProfile() {
   USER.lastExport = new Date().toISOString();
   delete USER.exportSnooze;
-  const blob = new Blob([JSON.stringify(USER, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify(exportPayload(), null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `yourjournal-${USER.id}-${new Date().toISOString().slice(0, 10)}.json`;
@@ -566,14 +609,102 @@ function exportBannerHTML() {
 }
 
 async function importProfile(file) {
-  const u = JSON.parse(await file.text());
+  return applyImportedProfile(JSON.parse(await file.text()));
+}
+
+function applyImportedProfile(u) {
   if (!u.id || !Array.isArray(u.subtopics)) throw new Error('Not a Your Journal profile');
+  // Unpack archived issues back into their own keys; the profile itself must not carry them.
+  const arch = u._archive;
+  delete u._archive;
   const profiles = listProfiles().filter(p => p.id !== u.id);
   profiles.push({ id: u.id, name: u.name });
   lsSet('profiles', profiles);
   lsSet('u:' + u.id, u);
+  if (arch && Array.isArray(arch.index)) {
+    for (const [id, arts] of Object.entries(arch.issues || {})) lsSet(issueKey(u.id, id), arts);
+    // Only index issues whose bodies actually made it in, so no row opens onto nothing.
+    lsSet(archKey(u.id), arch.index.filter(m => loadIssue(u.id, m.id)));
+  }
   lsSet('active', u.id);
   return u;
+}
+
+/* ------------------------------------------------------------ issue archive */
+
+/* Issues used to be overwritten: USER.run held one week and the previous one was gone. They
+   are now kept, but deliberately NOT inside the profile object.
+
+   lsSet swallows a quota error, and saveUser() writes the whole profile under a single key —
+   so a profile fat enough to fail would take every subsequent rating, save and favourite down
+   with it, silently, with only a toast. Issues are the one part of the profile that grows
+   without bound, so they live under their own keys: a failed archive write costs that issue
+   and nothing else.
+
+   They are also slimmed. A real week is ~300 KB, almost all of it abstracts, which fills a
+   5 MB quota in about four months — and the 30-day first issue is 1.09 MB on its own. Keeping
+   only what the feed actually renders takes a week to ~75 KB. A two-sentence excerpt survives
+   so an archived card still has body text rather than a blank where the preview was; `doi` and
+   `year` do not, because nothing displays them, and `url` is rebuilt from the pmid on load. */
+const ARCH_KEEP = 60;                    // hard ceiling on rows, whatever they weigh
+const ARCH_BUDGET = 3 * 1024 * 1024;     // bytes of archived bodies, of a ~5 MB quota
+const ARCH_EXCERPT = 200;                // characters; a feed card shows about this much
+
+const archKey = uid => 'arch:' + uid;
+const issueKey = (uid, id) => 'issue:' + uid + ':' + id;
+const archIndex = uid => lsGet(archKey(uid), []);
+const pubmedUrl = pmid => 'https://pubmed.ncbi.nlm.nih.gov/' + pmid + '/';
+
+function loadIssue(uid, id) {
+  const arts = lsGet(issueKey(uid, id), null);
+  if (arts) for (const a of arts) if (!a.url) a.url = pubmedUrl(a.pmid);
+  return arts;
+}
+
+function slimArticle(a) {
+  return {
+    pmid: a.pmid, title: a.title, journal: a.journal, journalName: a.journalName,
+    authors: (a.authors || []).slice(0, 3),
+    score: a.score, claudeScore: a.claudeScore, blurb: a.blurb || '', tag: a.tag || '',
+    // Only needed when there is no Claude blurb to show instead.
+    excerpt: a.blurb ? '' : firstSentences(a.abstract || '', 2, ARCH_EXCERPT),
+    // matched drives the term chips and the subtopic sections; a card shows five of them.
+    why: { matched: (a.why?.matched || []).slice(0, 5) },
+  };
+}
+
+function archiveRun(u, run) {
+  if (!run || !(run.articles || []).length) return null;
+  const id = String(run.generated || new Date().toISOString()).replace(/\D/g, '').slice(0, 14);
+  const body = run.articles.map(slimArticle);
+  const meta = {
+    id, since: run.since, until: run.until, journals: run.journals, total: run.total,
+    count: body.length, generated: run.generated || null, reranked: run.reranked || null,
+    lead: (run.articles[0] || {}).title || '', bytes: JSON.stringify(body).length,
+  };
+
+  lsSet(issueKey(u.id, id), body);
+  // lsSet swallows a quota failure, so confirm the body landed before indexing a row that
+  // would otherwise open onto nothing.
+  if (!lsGet(issueKey(u.id, id), null)) { toast('Not enough room to archive that issue.'); return null; }
+
+  const prev = archIndex(u.id);
+  const all = [meta, ...prev.filter(m => m.id !== id)].slice(0, ARCH_KEEP);
+  /* Retention is a byte budget, not only a row count. Issues vary four-fold — the first is a
+     month, the rest a week — so "keep the last 60" promises a capacity that may not exist:
+     60 real weeks came to 4.8 MB of a 5 MB quota, which would have started failing profile
+     saves. Keep the newest run of issues that fits and delete the bodies of the rest. */
+  const idx = [];
+  let used = 0;
+  for (const m of all) {
+    used += m.bytes || 0;
+    if (used > ARCH_BUDGET && idx.length) break;
+    idx.push(m);
+  }
+  const keep = new Set(idx.map(m => m.id));
+  for (const old of prev) if (!keep.has(old.id)) lsDel(issueKey(u.id, old.id));
+  lsSet(archKey(u.id), idx);
+  return meta;
 }
 
 /* ------------------------------------------------------------------ scoring */
@@ -1214,10 +1345,13 @@ function nav(view) {
   const tab = (v, label) => `<a class="tab ${view === v ? 'on' : ''}" data-view="${v}">${label}</a>`;
   const n = Object.keys(USER.library).length;
   const f = Object.keys(USER.favorites || {}).length;
+  // Only once there is history to look at — an empty tab is clutter for a first-week reader.
+  const arch = archIndex(USER.id).length;
   return `<nav><div class="in"><span class="brand" data-view="${ready ? 'feed' : 'onboard'}">Your Journal</span>` +
     (ready
       ? tab('feed', 'Feed') + tab('paper', 'The Paper') + tab('saved', `To Read Later · ${n}`) +
         tab('favorites', `★ ${f}`) +
+        (arch ? tab('issues', `Past issues · ${arch}`) : '') +
         tab('settings', 'Settings') + tab('how', 'How it works')
       : tab('onboard', 'Set up') + tab('how', 'How it works')) +
     `<span class="sp"></span><span class="who">${esc(USER.name)} · <a data-view="switch">switch</a></span></div></nav>`;
@@ -1233,7 +1367,7 @@ function syncCounts() {
   set('favorites', `★ ${Object.keys(USER.favorites || {}).length}`);
 }
 
-const BANNER_ON = new Set(['feed', 'saved', 'favorites', 'settings']);
+const BANNER_ON = new Set(['feed', 'saved', 'favorites', 'issues', 'settings']);
 let VIEW = '';
 const currentView = () => VIEW || 'feed';
 
@@ -1531,20 +1665,31 @@ function buildPairs() {
 }
 
 function viewPairs() {
-  const boxes = buildPairs().map(p => `<div class="pair" data-qid="${esc(p.id)}" data-axis="${esc(p.axis)}">
-    <div class="ax">${esc(p.axisName)}</div>
+  /* The count comes from the questions actually built. It used to be hard-coded to 12, from
+     when every axis was asked; since the asked set was cut to six by measurement, finishing
+     the last question reported "6/12" and read as though half the work were still to do. */
+  const pairs = buildPairs();
+  const n = pairs.length;
+  /* One "No preference" rather than a Both and a Neither. The two were separate buttons but
+     the same answer — the submit tally records a neutral for either and cannot tell them
+     apart — so the choice between them was work with no consequence. */
+  const boxes = pairs.map((p, i) => `<div class="pair" data-qid="${esc(p.id)}" data-axis="${esc(p.axis)}">
+    <div class="ax"><span class="qn">${i + 1}</span>${esc(p.axisName)}</div>
     <div class="opts"><button type="button" data-choice="low">${esc(p.low)}</button>
     <button type="button" data-choice="high">${esc(p.high)}</button></div>
-    <div class="skip"><button type="button" data-choice="both">Both</button>
-    <button type="button" data-choice="neither">Neither</button></div></div>`).join('');
+    <div class="skip"><button type="button" data-choice="either">No preference</button></div>
+    </div>`).join('');
   render('onboard', stepsBar('pairs') + `<h1>This or that</h1>
     <div class="sub">Two papers land in your inbox and you have time for one. Which do you open?
     There's no right answer — this measures the <b>kind</b> of paper you reach for, not the topic.
-    Skip any that don't feel like a real choice.</div>
+    <b>${n} questions.</b> Anything you genuinely can't call, mark <i>No preference</i>.</div>
     <form id="pairform">${boxes}
-    <div class="row sticky-row"><button class="btn" type="submit"
-      data-count="Build my formula ({n}/12) →" disabled>Build my formula (0/12) →</button>
-    <button class="btn ghost" type="button" data-goto="subtopics">← Back</button></div></form>`);
+    <div class="row sticky-row">
+      <button class="btn" type="submit" data-count="Build my formula ({n}/${n}) →" disabled>
+        Build my formula (0/${n}) →</button>
+      <button class="btn ghost" type="button" data-goto="subtopics">← Back</button>
+      <span class="pairprog" title="Questions answered"><i style="width:0%"></i></span>
+    </div></form>`);
 }
 
 /* Journals: suggested set on top, then the entire searchable registry so a reader can
@@ -1609,7 +1754,8 @@ function articleCard(a, rank, opts = {}) {
       ${badges(a)}
       ${opts.noMeter ? '' : `<div class="meter"><i style="width:${sc}%"></i></div>`}
       ${a.blurb ? `<div class="blurb">${esc(a.blurb)}</div>`
-                : (a.abstract ? `<div class="blurb dim">${esc(firstSentences(a.abstract, 2, 260))}</div>` : '')}
+                : (a.abstract ? `<div class="blurb dim">${esc(firstSentences(a.abstract, 2, 260))}</div>`
+                : (a.excerpt ? `<div class="blurb dim">${esc(a.excerpt)}</div>` : ''))}
       ${tags ? `<div>${tags}</div>` : ''}
       <div class="acts" data-pmid="${esc(a.pmid)}" data-verdict="${esc(fb.verdict || '')}" data-saved="${saved ? '1' : ''}">
         <button data-v="love" class="${fb.verdict === 'love' ? 'on' : ''}" title="Very interested — teaches the ranker, counts double">👍👍</button>
@@ -1653,7 +1799,8 @@ function viewFeed() {
   render('feed', toReadLaterStrip() + `<h1>${deep ? 'Your first issue' : 'This week'}</h1>
     <div class="sub">${run.since} → ${run.until}${deep ? ` · the past ${Math.round(span)} days` : ''} ·
     ${run.journals} journals · ${arts.length} articles
-    screened · scores are predicted interest (0–100) · <a data-view="paper">read it as a paper →</a></div>
+    screened · scores are predicted interest (0–100) · <a data-view="paper">read it as a paper →</a>${
+      archIndex(USER.id).length ? ' · <a data-view="issues">past issues →</a>' : ''}</div>
     <div class="row" style="margin-top:-.6rem">
       <button class="btn ghost" data-act="scan">Fetch again</button>
       ${run.reranked ? '<span class="hint">✓ Re-ranked by Claude</span>'
@@ -1865,6 +2012,58 @@ function viewPaper() {
       <a data-view="how">How the ranking works →</a></div></div>`, true);
 }
 
+/* ---------------------------------------------------------- past issues */
+
+/* The open archived issue, so rating and favouriting work from it exactly as they do in the
+   feed — findArticle() consults this. Held outside USER because it is a view, not profile
+   state, and must never be written back into the profile. */
+let OPEN_ISSUE = null;
+
+function viewIssues() {
+  const idx = archIndex(USER.id);
+  const cur = USER.run;
+  const row = (m, isCur) => `<li class="issrow" ${isCur ? '' : `data-openissue="${esc(m.id)}"`}>
+    <span class="isdate">${esc(m.since)} → ${esc(m.until)}</span>
+    <span class="islead">${esc(m.lead || '—')}</span>
+    <span class="ismeta">${m.count} articles · ${m.journals} journals${m.reranked ? ' · ✓ Claude' : ''}</span>
+    <span class="isgo">${isCur ? '<b>current</b>' : 'open →'}</span></li>`;
+
+  if (!idx.length && !cur) return render('issues', `<h1>Past issues</h1>
+    <div class="empty">No issues yet. <a data-act="scan">Fetch this week</a>.</div>`);
+
+  render('issues', `<h1>Past issues</h1>
+    <div class="sub">Each issue is archived when the next one is fetched — ${idx.length} kept.
+    They hold their titles, journals, scores, blurbs, matched terms and a short excerpt; the
+    full abstracts are dropped, which is what lets months of reading fit in the browser.</div>
+    <ul class="isslist">
+      ${cur ? row({ since: cur.since, until: cur.until, journals: cur.journals,
+                    count: (cur.articles || []).length, reranked: cur.reranked,
+                    lead: (cur.articles || [])[0]?.title || '' }, true) : ''}
+      ${idx.map(m => row(m, false)).join('')}
+    </ul>`);
+}
+
+function viewIssue(id) {
+  const meta = archIndex(USER.id).find(m => m.id === id);
+  const arts = loadIssue(USER.id, id);
+  if (!meta || !arts) {
+    OPEN_ISSUE = null;
+    return render('issues', `<h1>Past issues</h1>
+      <div class="empty">That issue is no longer stored. <a data-view="issues">Back to the list</a></div>`);
+  }
+  OPEN_ISSUE = { id, articles: arts };
+  const top = arts.slice(0, 12), more = arts.slice(12, 40);
+  render('issues', `<h1>${esc(meta.since)} → ${esc(meta.until)}</h1>
+    <div class="sub">${meta.count} articles · ${meta.journals} journals${meta.reranked ? ' · ✓ re-ranked by Claude' : ''}
+     · <a data-view="issues">← all issues</a></div>
+    <div class="note">An archived issue. Scores are the ones it was given at the time —
+    re-tiering your topics or rating more since then does not rewrite history. Rating and
+    saving from here still works.</div>
+    <h2>Top picks</h2>${top.map((a, i) => articleCard(a, i + 1)).join('')}
+    ${more.length ? `<h2>Also worth a look · 13–${12 + more.length}</h2>
+      ${more.map((a, i) => articleCard(a, i + 13)).join('')}` : ''}`);
+}
+
 function viewSaved() {
   const items = Object.values(USER.library).sort((a, b) => (b.savedAt || '').localeCompare(a.savedAt || ''));
   if (!items.length) return render('saved', `<h1>To Read Later</h1>
@@ -1926,6 +2125,13 @@ function viewSettings() {
       <div class="sub">${tierRows || 'none'}
       <div style="margin-top:.5rem">Core topics carry more weight and are guaranteed a slot
       in every issue. <a data-goto="subtopics">change or re-tier</a></div></div>
+    <h2>Past issues · ${archIndex(USER.id).length}</h2>
+      <div class="sub">Each issue is archived when the next one is fetched. Archived issues
+      drop their full abstracts — titles, journals, scores, blurbs, matched terms and a
+      two-sentence excerpt stay — which takes a week from about 300 KB to 78 KB. They are kept
+      newest-first until they fill ${Math.round(ARCH_BUDGET / 1048576)} MB, roughly nine months
+      of weekly reading, and are included when you export this profile.
+      <a data-view="issues">browse them →</a></div>
     <h2>Appearance</h2>
       <div class="sub">Applies to this browser, for every profile on it.</div>
       ${themePicker()}
@@ -2030,6 +2236,7 @@ function go(view) {
     case 'paper': return viewPaper();
     case 'saved': return viewSaved();
     case 'favorites': return viewFavorites();
+    case 'issues': OPEN_ISSUE = null; return viewIssues();
     case 'settings': return viewSettings();
     default: return viewFeed();
   }
@@ -2056,6 +2263,8 @@ async function doScan() {
       setTimeout(() => go('feed'), 2200);
       return;
     }
+    // Archive the outgoing issue before it is replaced — this is the only moment it exists.
+    archiveRun(USER, USER.run);
     USER.run = run; USER.step = 'ready'; saveUser();
     go('feed');
   } catch (e) {
@@ -2082,7 +2291,9 @@ async function doRerank() {
 }
 
 function findArticle(pmid) {
-  return (USER.run?.articles || []).find(a => a.pmid === pmid) || USER.library[pmid] || { pmid, title: '', abstract: '' };
+  return (USER.run?.articles || []).find(a => a.pmid === pmid)
+    || (OPEN_ISSUE?.articles || []).find(a => a.pmid === pmid)
+    || USER.library[pmid] || { pmid, title: '', abstract: '' };
 }
 
 document.addEventListener('click', async e => {
@@ -2090,6 +2301,9 @@ document.addEventListener('click', async e => {
 
   const use = t.closest('[data-use]');
   if (use) { const u = loadProfile(use.dataset.use); if (u) { USER = u; lsSet('active', u.id); go(u.step === 'ready' ? 'feed' : 'onboard'); } return; }
+
+  const openIss = t.closest('[data-openissue]');
+  if (openIss) { e.preventDefault(); return viewIssue(openIss.dataset.openissue); }
 
   const viewEl = t.closest('[data-view]');
   if (viewEl) { e.preventDefault(); return go(viewEl.dataset.view); }
@@ -2214,11 +2428,15 @@ document.addEventListener('click', async e => {
     box.querySelectorAll('button').forEach(b => b.classList.remove('on'));
     pb.classList.add('on');
     box.dataset.answer = pb.dataset.choice;
+    box.classList.add('answered');            // so a glance shows what is left, not just a count
     const form = $('#pairform');
     const btn = form.querySelector('[data-count]');
     const done = form.querySelectorAll('.pair[data-answer]').length;
+    const total = form.querySelectorAll('.pair').length;
     btn.disabled = done === 0;
     btn.textContent = btn.dataset.count.replace('{n}', done);
+    const bar = form.querySelector('.pairprog i');
+    if (bar) bar.style.width = (total ? Math.round(done / total * 100) : 0) + '%';
     return;
   }
 
