@@ -282,11 +282,36 @@ margin:.4rem 0 1rem;font:13px/1.6 ui-sans-serif,system-ui;color:var(--mut)}
 font:700 11px ui-sans-serif,system-ui;letter-spacing:.16em;text-transform:uppercase;color:var(--fg);
 border-top:3px double var(--rule);border-bottom:1px solid var(--line);padding:.5rem 0;margin:0 0 1.1rem}
 .secthead .secn{font-weight:400;color:var(--mut);letter-spacing:.04em}
+.secthead span:first-child{flex:1;min-width:0}
+/* A Core section is announced, not just ordered first — the heading is heavier, the accent
+   rule replaces the hairline, and the whole band is inset so it reads as a major department. */
+.psec.core .secthead{font-size:12px;color:var(--acc);border-top-color:var(--acc);
+border-bottom-color:var(--acc)}
+.psec.core{padding-left:.9rem;border-left:2px solid var(--acc);margin-left:-.9rem}
+.tchip{font:700 9px ui-sans-serif,system-ui;letter-spacing:.12em;text-transform:uppercase;
+color:var(--bg);background:var(--acc);border-radius:3px;padding:.1rem .35rem;flex:0 0 auto}
+
+/* contents strip */
+.contents{display:flex;flex-wrap:wrap;gap:.45rem .9rem;align-items:baseline;
+padding:.7rem 0 .8rem;margin-bottom:1.4rem;border-bottom:1px solid var(--rule);
+font:11px ui-sans-serif,system-ui;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+.contents b{color:var(--fg);letter-spacing:.16em}
+.citem i{font-style:normal;color:var(--mut);margin-left:.3rem;font-variant-numeric:tabular-nums}
+.citem.core{color:var(--acc);font-weight:700}
+
 .seconds{display:grid;grid-template-columns:1fr 1fr;gap:2.2rem;padding-bottom:1.6rem;
 margin-bottom:1.8rem;border-bottom:1px solid var(--rule)}
 .story.big h4{font-size:1.28rem;line-height:1.22}
 .story.big .dek{font-size:.97rem}
 .story.small h4{font-size:1.02rem}
+/* The tail of the issue: still readable, deliberately quieter than the departments above it. */
+.story.tiny{padding-bottom:.8rem;margin-bottom:.8rem}
+.story.tiny h4{font-size:.94rem;line-height:1.28;font-weight:600}
+.story.tiny .dek{font-size:.84rem;line-height:1.45;color:var(--mut);text-align:left;hyphens:none}
+.story.tiny .badges{display:none}
+/* A section holding one story gets the full measure rather than a lone column with a gap. */
+.cols.one{columns:1}
+.cols.one .story{max-width:44rem}
 .storyfoot{display:flex;align-items:center;gap:.6rem;margin-top:.55rem;flex-wrap:wrap}
 .storyfoot .scr{float:none;margin:0}
 .paper-sv{background:transparent;border:1px solid var(--line);border-radius:6px;color:var(--mut);
@@ -296,6 +321,12 @@ font:11px ui-sans-serif,system-ui;padding:.2rem .5rem;cursor:pointer;transition:
 .lead .storyfoot{margin-top:1rem}
 .blurb.dim{color:var(--mut)}
 @media(max-width:760px){.seconds{grid-template-columns:1fr;gap:1.4rem}}
+/* The Core band is inset by a negative margin on wide screens, where .paper has room to
+   spare. Narrow ones do not, so it would hang off the edge — keep the rule, drop the inset. */
+@media(max-width:720px){
+  .psec.core{margin-left:0;padding-left:.7rem}
+  .contents{gap:.35rem .7rem}
+}
 
 /* profile chooser */
 .pickgrid .pick{flex-direction:column;gap:.15rem;text-align:left}
@@ -1932,12 +1963,19 @@ function starvedPicks(articles, shown, limit = 6) {
   return out;
 }
 
+/* Four sizes rather than two. Everything below the lead used to render identically, so
+   stories 4 through 30 were one undifferentiated grey column — the monotony was the layout
+   having no opinion. Size now tracks the tier of the section a story sits in. */
+const STORY_LEN = { hero: [4, 560], big: [3, 420], small: [2, 240], tiny: [1, 150] };
+
 function paperStory(a, size) {
   const au = a.authors || [];
   const who = au.length > 2 ? au[0] + ' et al.' : au.join(', ');
   const saved = !!USER.library[a.pmid];
   const fav = !!(USER.favorites || {})[a.pmid];
-  const dek = a.blurb || firstSentences(a.abstract, size === 'big' ? 3 : 2, size === 'big' ? 420 : 240);
+  const [sent, cap] = STORY_LEN[size] || STORY_LEN.small;
+  // `excerpt` is what an archived issue carries in place of the abstract.
+  const dek = a.blurb || firstSentences(a.abstract || a.excerpt || '', sent, cap);
   const btn = `<button class="sv paper-sv ${saved ? 'on' : ''}" data-papersave="${esc(a.pmid)}"
     title="Add to To Read Later">${saved ? '📖 Saved' : '📖'}</button>
     <button class="fav paper-sv ${fav ? 'on' : ''}" data-fav="${esc(a.pmid)}"
@@ -1965,43 +2003,113 @@ function viewPaper() {
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const leadSaved = !!USER.library[lead.pmid];
 
-  // Two secondary stories get their own band under the lead, then the rest are
-  // grouped into named sections.
-  const seconds = arts.slice(1, 3);
-  const rest = arts.slice(3);
+  /* The two stories under the lead are an editorial choice, not simply ranks 2 and 3. If a
+     Core subtopic the lead did not come from has anything in the issue, one of the two slots
+     goes to its best paper. Every score is still printed beside every story, so nothing is
+     being dressed up — this decides placement on the page, not merit. */
+  const pool = arts.slice(1);
+  const leadKey = (subtopicOf(lead) || {}).key;
+  const seconds = [];
+  for (const k of byTier(USER)[0].keys) {
+    if (seconds.length) break;                       // at most one of the two slots is reserved
+    if (k === leadKey) continue;
+    const hit = pool.find(a => (subtopicOf(a) || {}).key === k);
+    if (hit) seconds.push(hit);
+  }
+  for (const a of pool) { if (seconds.length >= 2) break; if (!seconds.includes(a)) seconds.push(a); }
+  seconds.sort((x, y) => finalScore(y) - finalScore(x));
+
+  const rest = arts.filter(a => a !== lead && !seconds.includes(a));
+
+  /* Grouped by subtopic key rather than by display name, because the key is what carries the
+     tier — and the tier is what the order should follow. */
+  const MISC = '__misc';
   const groups = new Map();
   for (const a of rest) {
-    const k = sectionFor(a) || 'Also of note';
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k).push(a);
+    const s = subtopicOf(a);
+    const key = s ? s.key : MISC;
+    if (!groups.has(key)) groups.set(key, {
+      key, name: s ? s.name : 'Also of note',
+      tier: s ? tierOf(USER, key) : 'occasional', list: [],
+    });
+    groups.get(key).list.push(a);
   }
-  // Merge one-article sections into "Also of note" so the page isn't all headers.
-  const singles = [];
-  for (const [k, v] of [...groups]) {
-    if (v.length === 1 && k !== 'Also of note') { singles.push(...v); groups.delete(k); }
-  }
-  if (singles.length) groups.set('Also of note', (groups.get('Also of note') || []).concat(singles));
-  const ordered = [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
 
-  const sections = ordered.map(([name, list], i) => `
-    <section class="psec">
-      <div class="secthead"><span>${esc(name)}</span><span class="secn">${list.length}</span></div>
-      <div class="cols${i % 2 ? ' two' : ''}">${list.map(a => paperStory(a, 'small')).join('')}</div>
-    </section>`).join('');
+  /* A one-article section is a header with almost nothing under it, so those merge into the
+     miscellany — except when the reader called that subtopic Core. Being folded into a
+     generic pile is precisely what Core is supposed to prevent. */
+  const misc = groups.get(MISC) || { key: MISC, name: 'Also of note', tier: 'occasional', list: [] };
+  for (const g of [...groups.values()]) {
+    if (g.key !== MISC && g.list.length === 1 && g.tier !== 'core') {
+      misc.list.push(...g.list);
+      groups.delete(g.key);
+    }
+  }
+  groups.delete(MISC);
+  if (misc.list.length) { misc.list.sort((x, y) => finalScore(y) - finalScore(x)); groups.set(MISC, misc); }
+
+  /* Section order is the reader's stated interest, not the size of the pile. It used to sort
+     by article count, so an Occasional subtopic with eight papers opened the page while a Core
+     subtopic with two sat near the bottom — the exact inversion the tiers exist to prevent.
+     Within a tier, the section holding the better paper leads. */
+  const TIER_RANK = { core: 0, interested: 1, occasional: 2 };
+  const bestOf = g => Math.max(...g.list.map(finalScore));
+  const ordered = [...groups.values()].sort((x, y) =>
+    (x.key === MISC ? 1 : 0) - (y.key === MISC ? 1 : 0) ||
+    (TIER_RANK[x.tier] ?? 3) - (TIER_RANK[y.tier] ?? 3) ||
+    bestOf(y) - bestOf(x));
+
+  /* Column count and story size are driven by tier, so the shape of the page carries meaning
+     instead of the old alternating 3-up/2-up, which varied on section index — decoration that
+     told the reader nothing. A Core section runs wide with its best paper given room; an
+     Occasional one is a tight list. */
+  const sections = ordered.map(g => {
+    const core = g.tier === 'core' && g.key !== MISC;
+    const lean = g.tier === 'occasional' || g.key === MISC;
+    const cols = g.list.length === 1 ? ' one' : core ? ' two' : '';
+    const stories = g.list.map((a, i) =>
+      paperStory(a, core && i === 0 ? 'big' : lean ? 'tiny' : 'small')).join('');
+    return `<section class="psec${core ? ' core' : ''}">
+      <div class="secthead"><span>${esc(g.name)}</span>
+        ${core ? '<span class="tchip">Core</span>' : ''}
+        <span class="secn">${g.list.length}</span></div>
+      <div class="cols${cols}">${stories}</div>
+    </section>`;
+  }).join('');
+
+  /* A contents strip, which a front page earns its density with — and which is also the
+     quickest way for the reader to see that the order really is their order. */
+  const contents = ordered.length ? `<nav class="contents"><b>In this issue</b>
+    ${ordered.map(g => `<span class="citem${g.tier === 'core' && g.key !== MISC ? ' core' : ''}">${
+      esc(g.name)}<i>${g.list.length}</i></span>`).join('')}</nav>` : '';
+
+  // Design markers are the most interesting thing about a week; say so on the masthead rule.
+  let trials = 0, guides = 0;
+  for (const a of arts) {
+    const pc = practiceChanging(a);
+    if (!pc) continue;
+    if (pc.kind === 'guideline') guides++; else trials++;
+  }
+  const marks = [trials ? `${trials} randomised` : '', guides ? `${guides} guideline${guides > 1 ? 's' : ''}` : '']
+    .filter(Boolean).join(' · ');
 
   render('paper', toReadLaterStrip(3) + `<div class="paper">
     <div class="masthead"><h1>Your Journal</h1>
       <div class="dek">Curated for ${esc(USER.name)}</div></div>
     <div class="rule"><span>${esc(today)}</span><span>${run.articles.length} papers screened</span>
-      <span>${run.journals} journals</span></div>
+      ${marks ? `<span>${esc(marks)}</span>` : ''}<span>${run.journals} journals</span></div>
+    ${contents}
 
     <div class="lead"><div class="kick">${esc(kicker)}</div>
       <h3><a href="${esc(lead.url)}" target="_blank" rel="noopener">${esc(lead.title)}</a></h3>
       <div class="byline">${esc(leadWho)} · ${esc(lead.journalName || lead.journal)}</div>
-      <div class="body"><p>${esc(lead.blurb || firstSentences(lead.abstract, 4, 900))}</p></div>
+      ${badges(lead)}
+      <div class="body"><p>${esc(lead.blurb || firstSentences(lead.abstract || lead.excerpt || '', 4, 900))}</p></div>
       <div class="storyfoot"><span class="scr">${finalScore(lead)}</span>
         <button class="sv paper-sv ${leadSaved ? 'on' : ''}" data-papersave="${esc(lead.pmid)}"
-          title="Add to To Read Later">${leadSaved ? '📖 Saved' : '📖 Read later'}</button></div>
+          title="Add to To Read Later">${leadSaved ? '📖 Saved' : '📖 Read later'}</button>
+        <button class="fav paper-sv ${(USER.favorites || {})[lead.pmid] ? 'on' : ''}"
+          data-fav="${esc(lead.pmid)}" title="Favorite">${(USER.favorites || {})[lead.pmid] ? '★' : '☆'}</button></div>
     </div>
 
     ${seconds.length ? `<div class="seconds">${seconds.map(a => paperStory(a, 'big')).join('')}</div>` : ''}
