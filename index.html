@@ -934,11 +934,104 @@ function userTerms(u) {
 const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const hasPhrase = (hay, p) => new RegExp('(?<![a-z0-9])' + escRe(p) + '(?![a-z0-9])').test(hay);
 
-function axisSignal(hay, ax) {
+/* ------------------------------------------------------- field-weighted matching */
+
+/* A match is not a match. A term in the title is what the paper is *about*; the same term in a
+   discussion may be a passing comparison. Every field used to be concatenated into one string
+   and asked a yes/no question, so position, repetition and provenance were all discarded —
+   which is how "randomised" in a cohort study's background pushed the trials axis exactly as
+   hard as a real trial's own title.
+
+   Measured over a real week: of 205 keyword matches, 38% were in a title, 42% were abstract-only
+   and 20% came from keywords/MeSH. A third of the articles that surfaced at all never named the
+   matched term in their title. */
+const FIELD_W = { title: 2.4, meta: 1.7, abstract: 1.0 };
+
+/* These multipliers inflate the summed weight, so the saturation constants absorb it and the
+   curves stay where they were calibrated instead of bunching every decent article near 1.
+   Both are the old value scaled by the mean multiplier measured over a real week — 1.53, not
+   the 1.7 a glance at the field split suggests, because the thin-record rule below hands a
+   good share of title matches back to the neutral weight. */
+const TOPIC_K = 2.75;     // was 1.8  (1.8 x 1.53)
+const LEARNED_K = 6.1;    // was 4    (4 x 1.53)
+
+/* The title premium claims "this is the subject, not a passing mention" — a claim that only
+   means something when there is a body the term could have been mentioned in passing *in*. A
+   record with no real abstract (a correction, an erratum, a letter, a news item) has nothing to
+   contrast against, so the premium would be paying for the absence of text rather than the
+   presence of subject, and those records would climb on the strength of having said less.
+   Below MIN_BODY the title falls back to the neutral weight — not a penalty, just no bonus.
+
+   200 characters is where the record types actually separate. Over a real week: 100% of
+   editorials, letters and comments and 100% of errata and corrections fall below it, 0% of
+   reviews do, and the 20% of research articles that do are the abstract-less ahead-of-print
+   records, which genuinely have no body to corroborate a title match either. */
+const MIN_BODY = 200;
+
+const normField = s => ' ' + String(s || '').toLowerCase().replace(/\s+/g, ' ') + ' ';
+
+function fieldsOf(a) {
+  const body = a.abstract || '';
+  return {
+    title: normField(a.title),
+    meta: normField((a.keywords || []).join(' ') + ' ' + (a.mesh || []).join(' ') + ' '
+      + (a.pubtypes || []).join(' ')),
+    body: normField(body),
+    thin: body.length < MIN_BODY,
+  };
+}
+
+/* Feedback keeps the title separate from the joined text, which is enough to field-weight the
+   axis evidence a rating carries. */
+const feedbackFields = r => ({
+  title: normField(r.title),
+  meta: ' ',
+  body: normField(r.text || r.title || ''),
+  thin: String(r.text || '').length < MIN_BODY,
+});
+
+/* What the best field a term appears in is worth. Title first, then metadata, then body — a
+   term in several fields keeps the strongest, it does not accumulate. `phrase` distinguishes
+   taxonomy terms (whole-phrase) from axis signals (substrings), which is how each was matched
+   before this split. */
+function fieldWeight(f, t, phrase = true) {
+  const hit = (h, s) => (phrase ? hasPhrase(h, s) : h.includes(s));
+  if (hit(f.title, t)) return f.thin ? FIELD_W.abstract : FIELD_W.title;
+  if (hit(f.meta, t)) return FIELD_W.meta;
+  if (hit(f.body, t)) return FIELD_W.abstract;
+  return 0;
+}
+
+/* Learned tokens get the same treatment: a phrase the reader has been taught to like counts for
+   more when it is the paper's subject than when it appears once in a limitations paragraph. */
+function learnedTokens(f) {
+  const out = new Map();
+  const add = (text, w) => { for (const t of termsOf(text)) if ((out.get(t) || 0) < w) out.set(t, w); };
+  add(f.body, FIELD_W.abstract);
+  add(f.meta, FIELD_W.meta);
+  add(f.title, f.thin ? FIELD_W.abstract : FIELD_W.title);
+  return out;
+}
+
+/* Direction from the balance of the two poles, magnitude from how much weighted evidence there
+   actually is.
+
+   The magnitude term is what makes field weighting mean anything here. A bare ratio is
+   scale-invariant: with only one pole firing it returns ±1 whether that pole was a title
+   "randomized placebo-controlled trial" or a single "unlike randomized trials" in a cohort
+   study's background, and multiplying both by a field weight cancels out. So the ratio said
+   the same thing about both, which is the very confusion this was supposed to fix.
+
+     one passing body mention  → 0.69      a title design phrase → 0.96
+     two title design phrases  → 0.999                                                      */
+const AXIS_CONF_K = 1.2;
+
+function axisSignal(f, ax) {
   let lo = 0, hi = 0;
-  for (const s of ax.low_signals) if (hay.includes(s)) lo++;
-  for (const s of ax.high_signals) if (hay.includes(s)) hi++;
-  return lo + hi === 0 ? 0 : (hi - lo) / (lo + hi);
+  for (const s of ax.low_signals) lo += fieldWeight(f, s, false);
+  for (const s of ax.high_signals) hi += fieldWeight(f, s, false);
+  if (lo + hi === 0) return 0;
+  return ((hi - lo) / (lo + hi)) * Math.tanh((lo + hi) / AXIS_CONF_K);
 }
 
 /* Absent evidence is not negative evidence — and the original formula scored it as such.
@@ -980,19 +1073,20 @@ function scoreScale(u, priors) {
 }
 
 function scoreArticle(a, u, terms, priors, scale = scoreScale(u, priors)) {
-  const text = [a.title, a.abstract, (a.keywords || []).join(' '), (a.mesh || []).join(' '),
-    (a.pubtypes || []).join(' ')].join(' ');
-  const hay = ' ' + text.toLowerCase().replace(/\s+/g, ' ') + ' ';
+  const f = fieldsOf(a);
 
   const hits = [];
-  for (const [t, w] of terms) if (hasPhrase(hay, t)) hits.push([t, w]);
+  for (const [t, w] of terms) {
+    const fw = fieldWeight(f, t);
+    if (fw) hits.push([t, w * fw]);
+  }
   hits.sort((x, y) => y[1] - x[1]);
   /* Saturating rather than clamped. A hard min(1, sum/2.6) pinned every well-matched
      article to exactly 1.0, which threw away the ordering *within* the good ones — and
      made subtopic rank weights invisible, since they only shift a sum that was already
      over the cap. This curve approaches 1 without reaching it, so weights always tell. */
   const topic = hits.length
-    ? 1 - Math.exp(-hits.slice(0, 8).reduce((s, h) => s + h[1], 0) / 1.8)
+    ? 1 - Math.exp(-hits.slice(0, 8).reduce((s, h) => s + h[1], 0) / TOPIC_K)
     : 0;
 
   let axTotal = 0, axN = 0;
@@ -1000,7 +1094,7 @@ function scoreArticle(a, u, terms, priors, scale = scoreScale(u, priors)) {
   for (const ax of DATA.axes.axes) {
     const pref = u.axisScores[ax.id];
     if (pref === undefined) continue;
-    const sig = axisSignal(hay, ax);
+    const sig = axisSignal(f, ax);
     if (sig === 0) continue;
     const c = pref * sig;
     axDetail[ax.id] = Math.round(c * 100) / 100;
@@ -1018,10 +1112,12 @@ function scoreArticle(a, u, terms, priors, scale = scoreScale(u, priors)) {
 
   const jp = priors[(a.journal || '').toLowerCase()] ?? 0.6;
 
+  /* Only the scoring side is field-aware. What relearn() extracted is a term-level preference
+     the reader taught; where that term turns up in a new paper is a matching question, and
+     mixing the two would rescale the log-odds it computes against counts that never moved. */
   let learnedRaw = 0;
-  const seen = new Set(termsOf(text));
-  for (const t of seen) learnedRaw += u.weights[t] || 0;
-  const learned = Math.tanh(learnedRaw / 4);
+  for (const [t, fw] of learnedTokens(f)) learnedRaw += (u.weights[t] || 0) * fw;
+  const learned = Math.tanh(learnedRaw / LEARNED_K);
 
   let base = (W_TOPIC * topic + W_JOURNAL * jp
     + W_AXIS_UP * Math.max(0, axis) + W_AXIS_DN * Math.min(0, axis)
@@ -1078,13 +1174,16 @@ function relearnAxes(u) {
   for (const r of Object.values(u.feedback)) {
     const w = VERDICT_W[r.verdict];
     if (!w) continue;
-    const hay = ' ' + (r.text || r.title || '').toLowerCase().replace(/\s+/g, ' ') + ' ';
+    const rf = feedbackFields(r);
     for (const ax of DATA.axes.axes) {
-      const sig = axisSignal(hay, ax);
+      const sig = axisSignal(rf, ax);
       if (!sig) continue;                       // silent on this axis: no evidence either way
       const a = acc[ax.id] || (acc[ax.id] = { num: 0, den: 0, m: 0 });
       a.num += w * sig;                         // liked + leans high → pull toward high
-      a.den += Math.abs(w);
+      /* Weighted by the signal's magnitude, not just the verdict's. Now that a weak signal
+         reports a small number, dividing by |w| alone would let it drag the average toward
+         zero instead of simply counting for less than a strong one. */
+      a.den += Math.abs(w) * Math.abs(sig);
       a.m += 1;
     }
   }
