@@ -330,6 +330,22 @@ font:11px ui-sans-serif,system-ui;padding:.2rem .5rem;cursor:pointer;transition:
 
 /* profile chooser */
 .pickgrid .pick{flex-direction:column;gap:.15rem;text-align:left}
+/* quick start */
+.quickstart{background:var(--hi);border:1px solid var(--line);border-radius:10px;
+padding:.9rem 1.1rem;margin:0 0 1.8rem}
+.quickstart summary{cursor:pointer;font:600 13px ui-sans-serif,system-ui;color:var(--fg)}
+.qshead{font:600 11px ui-sans-serif,system-ui;letter-spacing:.1em;text-transform:uppercase;
+color:var(--mut);margin-bottom:.6rem}
+.qslist{list-style:none;margin:.6rem 0 0;padding:0;display:flex;flex-direction:column;gap:.5rem}
+.qslist li{display:flex;gap:.6rem;align-items:flex-start;
+font:13px/1.5 ui-sans-serif,system-ui;color:var(--mut)}
+.qslist b{color:var(--fg)}
+.qsn{flex:0 0 auto;display:grid;place-items:center;width:1.3rem;height:1.3rem;margin-top:.05rem;
+border-radius:50%;background:var(--acc);color:var(--bg);font:700 11px ui-sans-serif,system-ui}
+.qsend{margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--line);
+font:13px/1.5 ui-sans-serif,system-ui;color:var(--mut)}
+.qsend b{color:var(--fg)}
+
 /* profile rows + delete */
 .pickrow{display:flex;gap:.4rem;align-items:stretch}
 .pickrow .pick{flex:1;min-width:0}
@@ -1657,6 +1673,32 @@ function profileRow(p) {
     </div></div>`;
 }
 
+/* Four lines, one per setup screen. "How it works" explains why the thing works and runs to
+   about two minutes; this only answers "what am I about to be asked?", which is the question
+   somebody staring at a blank profile screen actually has. Returning readers get it collapsed,
+   because they have already done it. */
+const QUICK_START = [
+  ['Specialties', 'Pick what you practise. Broad is fine — you narrow on the next screen.'],
+  ['Subtopics', 'Choose the topics you want, then sort them into <b>Core</b>, <b>Interested</b> and <b>Occasional</b>. Core topics carry more weight and are guaranteed a place in every issue.'],
+  ['This or that', 'Six quick either/or questions about the <i>kind</i> of paper you reach for — trials or mechanism, adults or children. Not about topics; that part is done.'],
+  ['Journals', 'The strongest matches are already ticked. Add or remove any, then it builds your first issue.'],
+];
+
+function quickStart(hasProfiles) {
+  const steps = QUICK_START.map(([name, what], i) =>
+    `<li><span class="qsn">${i + 1}</span><span><b>${esc(name)}</b> — ${what}</span></li>`).join('');
+  const inner = `<ol class="qslist">${steps}</ol>
+    <div class="qsend"><b>Then rate a few.</b> 👍 and 👎 are what teach it — one pass through your
+    first issue is enough to see it change. 📖 and ★ just save things and never affect the ranking.
+    <a data-view="how">The longer version →</a></div>`;
+  if (hasProfiles) {
+    return `<details class="quickstart"><summary>New here? Four screens, about two minutes</summary>
+      ${inner}</details>`;
+  }
+  return `<div class="quickstart open"><div class="qshead">Four screens, about two minutes</div>
+    ${inner}</div>`;
+}
+
 function viewPick() {
   const profiles = listProfiles();
   const rows = profiles.map(profileRow).join('');
@@ -1664,6 +1706,8 @@ function viewPick() {
   render('pick', `<h1>Your Journal</h1>
     <div class="sub">A weekly issue of new research, ranked for what you actually read.
       Answer a few questions and it builds you a front page.</div>
+
+    ${quickStart(profiles.length > 0)}
 
     ${profiles.length ? `<h2>Continue as</h2><div class="grid pickgrid">${rows}</div>` : ''}
 
