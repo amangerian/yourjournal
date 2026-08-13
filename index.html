@@ -330,6 +330,33 @@ font:11px ui-sans-serif,system-ui;padding:.2rem .5rem;cursor:pointer;transition:
 
 /* profile chooser */
 .pickgrid .pick{flex-direction:column;gap:.15rem;text-align:left}
+/* profile rows + delete */
+.pickrow{display:flex;gap:.4rem;align-items:stretch}
+.pickrow .pick{flex:1;min-width:0}
+.delprof{flex:0 0 auto;background:transparent;border:1px solid var(--line);border-radius:9px;
+color:var(--mut);cursor:pointer;font:14px ui-sans-serif,system-ui;padding:0 .7rem;opacity:.5;
+transition:all .13s}
+.delprof:hover{opacity:1;color:var(--dn);border-color:var(--dn);background:var(--dnbg)}
+.pickrow.danger{flex-direction:column;gap:.7rem;background:var(--dnbg);border:1px solid var(--dn);
+border-radius:10px;padding:.9rem 1rem}
+.delmsg b{display:block;font-size:.97rem;margin-bottom:.2rem}
+.delacts{display:flex;gap:.5rem;flex-wrap:wrap}
+.delacts .btn{margin:0}
+.btn.danger{background:var(--dn);border-color:var(--dn);color:var(--bg)}
+.btn.danger:hover{opacity:.88}
+
+/* share */
+.sharewrap{position:relative;display:inline-flex}
+.sharemenu{position:absolute;bottom:calc(100% + .3rem);left:0;z-index:20;display:flex;
+flex-direction:column;min-width:9.5rem;background:var(--card);border:1px solid var(--line);
+border-radius:9px;padding:.25rem;box-shadow:0 6px 22px rgba(0,0,0,.22)}
+.sharemenu[hidden]{display:none}
+.sharemenu button{display:block;width:100%;text-align:left;background:none;border:0;
+border-radius:6px;color:var(--fg);cursor:pointer;font:13px ui-sans-serif,system-ui;
+padding:.45rem .6rem;opacity:1}
+.sharemenu button:hover{background:var(--hi)}
+.nativeonly{display:none}
+:root.can-share .sharemenu .nativeonly{display:block}
 .newrow{display:flex;gap:.5rem;align-items:center;margin:.5rem 0 1rem;flex-wrap:wrap}
 .newrow input{flex:1 1 14rem;min-width:0;background:var(--card);border:1px solid var(--line);
   color:var(--fg);border-radius:7px;padding:.55rem .7rem;font:inherit;font-size:.95rem}
@@ -474,6 +501,56 @@ color:var(--mut);margin-bottom:.45rem}
 .waitcard p:last-child{margin-bottom:0}
 .waitcard .hint{color:var(--mut);font-size:12px}
 
+/* ---- small screens -------------------------------------------------------
+   Everything above is fluid or wraps; these are the places where it wraps into
+   something worse than it scrolls into, or where a touch target is too small. */
+
+/* Long titles, journal names and pasted URLs are the usual cause of a page that
+   scrolls sideways. Break them rather than letting one word set the page width. */
+.ti,.ti a,.blurb,.meta,.story h4,.lead h3,.islead,.trl li a,.nm,.rname{overflow-wrap:anywhere}
+.grid,.pickgrid,.waitgrid{min-width:0}
+.grid>*,.pickgrid>*{min-width:0}
+
+@media(max-width:760px){
+  /* Seven tabs wrapped into a three-line sticky bar that ate a third of the screen.
+     One scrollable strip keeps it to a single row and stays reachable by thumb. */
+  nav .in{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  nav .in::-webkit-scrollbar{display:none}
+  nav .brand{margin-right:.5rem;flex:0 0 auto}
+  nav a.tab{flex:0 0 auto}
+  nav .sp{display:none}
+  nav .who{flex:0 0 auto;padding-left:.5rem}
+  .paper .rule{flex-wrap:wrap;gap:.2rem .9rem;justify-content:flex-start}
+}
+
+@media(max-width:620px){
+  body{padding:0 .9rem 5rem}
+  /* 28px was under the thumb-target floor; these are the controls used most. */
+  .acts{gap:.3rem}
+  .acts button{padding:.5rem .7rem;min-height:2.4rem;opacity:.75}
+  .paper-sv{padding:.4rem .6rem;min-height:2.2rem}
+  .delprof{min-width:2.6rem}
+  /* A popover anchored to a button that may sit anywhere in a wrapped row will clip off
+     one edge or the other. On a phone it becomes a sheet, which cannot. */
+  .sharemenu{position:fixed;left:.9rem;right:.9rem;bottom:.9rem;top:auto;min-width:0;
+  border-radius:12px;padding:.35rem;box-shadow:0 -4px 30px rgba(0,0,0,.3)}
+  .sharemenu button{padding:.75rem .8rem;font-size:14px}
+  /* min-width in rem overflows a 320px viewport once body padding is taken off. */
+  input[type=text],input[type=password]{min-width:0;width:100%}
+  .newrow input{flex:1 1 100%}
+  .trl li{flex-wrap:wrap}
+  .trl li .src{white-space:normal}
+  .ismeta{white-space:normal}
+  /* Inline left/right from the popover nudge must not fight the sheet layout. */
+  .sharemenu{left:.9rem!important;right:.9rem!important}
+  .how-table{display:block;overflow-x:auto;max-width:100%}
+  .how-table td:first-child{white-space:normal}
+  .jbrowse{max-height:22rem}
+  .grid{grid-template-columns:1fr}
+  .masthead{padding:1rem 0 .7rem}
+  .lead .body::first-letter{font-size:2.6rem}
+}
+
 </style>
 </head>
 <body>
@@ -516,6 +593,19 @@ let USER = null;
 const lsGet = (k, d) => { try { const v = localStorage.getItem(STORE + k); return v ? JSON.parse(v) : d; } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(STORE + k, JSON.stringify(v)); } catch (e) { toast('Storage full — export your profile.'); } };
 const lsDel = k => { try { localStorage.removeItem(STORE + k); } catch (e) { /* nothing to undo */ } };
+/* Every key under a prefix, so deleting a profile can sweep issue bodies it may not have an
+   index for. Scanning beats trusting the index: a stale one strands megabytes with nothing
+   pointing at them, and the quota is the scarce resource here. */
+const lsKeys = prefix => {
+  const out = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.indexOf(STORE + prefix) === 0) out.push(k.slice(STORE.length));
+    }
+  } catch (e) { /* storage not enumerable */ }
+  return out;
+};
 
 function listProfiles() { return lsGet('profiles', []); }
 
@@ -591,26 +681,38 @@ const SNOOZE_FOR = 3 * DAY;     // "not now" buys three days, not silence
 /* Archived issues live under their own keys, so a plain dump of USER would quietly leave
    them behind — and the export banner promises a backup. They ride along under _archive and
    are unpacked back into their own keys on import, so the on-disk split is invisible here. */
-function exportPayload() {
-  const index = archIndex(USER.id);
+function exportPayload(u = USER) {
+  const index = archIndex(u.id);
   const issues = {};
   for (const m of index) {
-    const arts = loadIssue(USER.id, m.id);
+    const arts = loadIssue(u.id, m.id);
     if (arts) issues[m.id] = arts;
   }
-  return index.length ? { ...USER, _archive: { index, issues } } : { ...USER };
+  return index.length ? { ...u, _archive: { index, issues } } : { ...u };
 }
 
-function exportProfile() {
-  USER.lastExport = new Date().toISOString();
-  delete USER.exportSnooze;
-  const blob = new Blob([JSON.stringify(exportPayload(), null, 2)], { type: 'application/json' });
+// Takes a profile so the delete confirmation can offer a backup of one that is not active.
+function exportProfile(u = USER) {
+  u.lastExport = new Date().toISOString();
+  delete u.exportSnooze;
+  const blob = new Blob([JSON.stringify(exportPayload(u), null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `yourjournal-${USER.id}-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `yourjournal-${u.id}-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
-  saveUser();
+  lsSet('u:' + u.id, u);
+}
+
+/* Deleting a profile has to take its issues with it. They live under their own keys, so
+   dropping the row from `profiles` alone would leave the bodies behind forever — invisible,
+   unreachable, and still spending the quota that everything else competes for. */
+function deleteProfile(id) {
+  for (const k of lsKeys('issue:' + id + ':')) lsDel(k);
+  lsDel('arch:' + id);
+  lsDel('u:' + id);
+  lsSet('profiles', listProfiles().filter(p => p.id !== id));
+  if (lsGet('active', null) === id) { lsSet('active', null); USER = null; }
 }
 
 /* Nag to export, but only when there is something to lose and only once a week.
@@ -1414,18 +1516,51 @@ function render(view, inner, wide) {
 
 /* The first screen, and the one 'switch' returns to. Profiles live per-browser,
    so this is a chooser, not a login — say so rather than implying an account. */
-function viewPick() {
-  const profiles = listProfiles();
-  const rows = profiles.map(p => {
-    const u = loadProfile(p.id) || {};
+/* The profile awaiting a confirmed delete. Deletion is unrecoverable — there is no server to
+   restore from — so it takes a deliberate second step, and the confirmation names what is
+   actually about to be lost rather than asking "are you sure?" about nothing in particular. */
+let PENDING_DELETE = null;
+
+function profileRow(p) {
+  const u = loadProfile(p.id) || {};
+  const rated = Object.keys(u.feedback || {}).length;
+  const saved = Object.keys(u.library || {}).length;
+  const faved = Object.keys(u.favorites || {}).length;
+  const issues = archIndex(p.id).length;
+
+  if (PENDING_DELETE !== p.id) {
     const bits = [];
     if (u.journals?.length) bits.push(`${u.journals.length} journals`);
     if (u.step && u.step !== 'ready') bits.push('setup unfinished');
-    if (Object.keys(u.feedback || {}).length) bits.push(`${Object.keys(u.feedback).length} rated`);
-    return `<button class="pick" data-use="${esc(p.id)}">
-      <span class="nm">${esc(p.name)}</span>
-      <span class="ct">${esc(bits.join(' · ') || 'new profile')}</span></button>`;
-  }).join('');
+    if (rated) bits.push(`${rated} rated`);
+    if (issues) bits.push(`${issues} past issue${issues === 1 ? '' : 's'}`);
+    // Sibling buttons, not nested — a button inside a button is invalid and does not click.
+    return `<div class="pickrow">
+      <button class="pick" data-use="${esc(p.id)}">
+        <span class="nm">${esc(p.name)}</span>
+        <span class="ct">${esc(bits.join(' · ') || 'new profile')}</span></button>
+      <button class="delprof" data-delprof="${esc(p.id)}"
+        title="Delete ${esc(p.name)}" aria-label="Delete ${esc(p.name)}">✕</button>
+    </div>`;
+  }
+
+  const loses = [rated ? `${rated} ratings` : '', saved ? `${saved} saved` : '',
+    faved ? `${faved} favourites` : '', issues ? `${issues} past issue${issues === 1 ? '' : 's'}` : '',
+  ].filter(Boolean).join(' · ');
+  return `<div class="pickrow danger">
+    <div class="delmsg"><b>Delete ${esc(p.name)}?</b>
+      <span class="hint">${loses ? 'Throws away ' + esc(loses) + '. ' : ''}Profiles live only in
+      this browser, so there is no copy anywhere else and this cannot be undone.</span></div>
+    <div class="delacts">
+      <button class="btn ghost" data-delexport="${esc(p.id)}">Export first</button>
+      <button class="btn danger" data-delconfirm="${esc(p.id)}">Delete for good</button>
+      <button class="btn ghost" data-delcancel="1">Cancel</button>
+    </div></div>`;
+}
+
+function viewPick() {
+  const profiles = listProfiles();
+  const rows = profiles.map(profileRow).join('');
 
   render('pick', `<h1>Your Journal</h1>
     <div class="sub">A weekly issue of new research, ranked for what you actually read.
@@ -1768,6 +1903,49 @@ function viewJournals() {
 
 /* ------------------------------------------------------------------- reading */
 
+/* ------------------------------------------------------------------- sharing */
+
+const shareUrl = a => a.url || pubmedUrl(a.pmid);
+const shareBody = a => `${a.title}\n\n${shareUrl(a)}`;
+
+/* One button opening two named actions, rather than two more buttons in a row that already
+   holds five. "Share…" only appears where navigator.share exists — on a phone that is the
+   native sheet, which is also the better route to Messages than an sms: link. */
+function shareControls(pmid, cls) {
+  return `<span class="sharewrap">
+    <button class="${cls} sh" data-share="${esc(pmid)}" title="Share" aria-label="Share">⤴</button>
+    <span class="sharemenu" hidden>
+      <button type="button" data-copylink="${esc(pmid)}">🔗 Copy link</button>
+      <button type="button" data-smslink="${esc(pmid)}">💬 Text</button>
+      <button type="button" class="nativeonly" data-nativeshare="${esc(pmid)}">📤 Share…</button>
+    </span></span>`;
+}
+
+/* Clipboard, with a fallback that matters here: navigator.clipboard needs a secure context,
+   and this app is built to be opened straight off the disk from file://, where it is not
+   available. execCommand is deprecated and still the only thing that works there. */
+async function copyText(s) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(s); return true; }
+  } catch (e) { /* fall through to the old way */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = s;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, s.length);
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch (e) { return false; }
+}
+
+function closeShareMenus(except) {
+  document.querySelectorAll('.sharemenu').forEach(m => { if (m !== except) m.hidden = true; });
+}
+
 function articleCard(a, rank, opts = {}) {
   const fb = USER.feedback[a.pmid] || {};
   const saved = !!USER.library[a.pmid];
@@ -1795,6 +1973,7 @@ function articleCard(a, rank, opts = {}) {
         <button class="sv ${saved ? 'on' : ''}" title="Add to To Read Later">${saved ? '📖 Saved' : '📖 Read later'}</button>
         <button class="fav ${fav ? 'on' : ''}" data-fav="${esc(a.pmid)}"
           title="${fav ? 'Remove from Favorites' : 'Favorite — keep this one for good'}">${fav ? '★ Favorite' : '☆ Favorite'}</button>
+        ${shareControls(a.pmid, '')}
         <span class="st"></span></div>
     </div></div>`;
 }
@@ -1979,7 +2158,8 @@ function paperStory(a, size) {
   const btn = `<button class="sv paper-sv ${saved ? 'on' : ''}" data-papersave="${esc(a.pmid)}"
     title="Add to To Read Later">${saved ? '📖 Saved' : '📖'}</button>
     <button class="fav paper-sv ${fav ? 'on' : ''}" data-fav="${esc(a.pmid)}"
-      title="${fav ? 'Remove from Favorites' : 'Favorite'}">${fav ? '★' : '☆'}</button>`;
+      title="${fav ? 'Remove from Favorites' : 'Favorite'}">${fav ? '★' : '☆'}</button>
+    ${shareControls(a.pmid, 'paper-sv')}`;
   return `<div class="story ${size}">
     <div class="src">${esc(a.journalName || a.journal)}</div>
     <h4><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title)}</a></h4>
@@ -2109,7 +2289,8 @@ function viewPaper() {
         <button class="sv paper-sv ${leadSaved ? 'on' : ''}" data-papersave="${esc(lead.pmid)}"
           title="Add to To Read Later">${leadSaved ? '📖 Saved' : '📖 Read later'}</button>
         <button class="fav paper-sv ${(USER.favorites || {})[lead.pmid] ? 'on' : ''}"
-          data-fav="${esc(lead.pmid)}" title="Favorite">${(USER.favorites || {})[lead.pmid] ? '★' : '☆'}</button></div>
+          data-fav="${esc(lead.pmid)}" title="Favorite">${(USER.favorites || {})[lead.pmid] ? '★' : '☆'}</button>
+        ${shareControls(lead.pmid, 'paper-sv')}</div>
     </div>
 
     ${seconds.length ? `<div class="seconds">${seconds.map(a => paperStory(a, 'big')).join('')}</div>` : ''}
@@ -2329,6 +2510,8 @@ function viewBuilding(msg) {
 }
 
 function go(view) {
+  // Navigating anywhere abandons a half-made delete rather than leaving it armed.
+  PENDING_DELETE = null;
   if (view === 'how' && !USER) { const u = USER; USER = { name: '', step: '', library: {} };
     viewHow(); USER = u; return; }
   if (view === 'switch') { lsSet('active', null); USER = null; return viewPick(); }
@@ -2401,11 +2584,95 @@ async function doRerank() {
 function findArticle(pmid) {
   return (USER.run?.articles || []).find(a => a.pmid === pmid)
     || (OPEN_ISSUE?.articles || []).find(a => a.pmid === pmid)
-    || USER.library[pmid] || { pmid, title: '', abstract: '' };
+    || USER.library[pmid] || (USER.favorites || {})[pmid]
+    || { pmid, title: '', abstract: '' };
 }
 
 document.addEventListener('click', async e => {
   const t = e.target;
+
+  /* Any click anywhere closes an open share menu, except one inside the menu itself or on the
+     button that opened it. Runs first so it cannot be skipped by an early return below. */
+  const inShare = t.closest('.sharewrap');
+  if (!inShare) closeShareMenus();
+
+  const shareBtn = t.closest('[data-share]');
+  if (shareBtn) {
+    e.preventDefault();
+    const menu = shareBtn.parentElement.querySelector('.sharemenu');
+    const opening = menu.hidden;
+    closeShareMenus(menu);
+    menu.hidden = !opening;
+    /* The button sits at the end of a wrapping row, so it can end up anywhere across the
+       width. Anchor left by default and flip to right only if that would run off screen.
+       Skipped on phones, where the menu is a full-width sheet and has nothing to clip. */
+    if (!menu.hidden && window.matchMedia('(min-width:621px)').matches) {
+      menu.style.left = '0';
+      menu.style.right = 'auto';
+      if (menu.getBoundingClientRect().right > document.documentElement.clientWidth - 8) {
+        menu.style.left = 'auto';
+        menu.style.right = '0';
+      }
+    }
+    return;
+  }
+
+  const copyBtn = t.closest('[data-copylink]');
+  if (copyBtn) {
+    e.preventDefault();
+    const a = findArticle(copyBtn.dataset.copylink);
+    toast(await copyText(shareUrl(a)) ? 'Link copied.' : 'Could not copy — the link is in the title.');
+    closeShareMenus();
+    return;
+  }
+
+  const smsBtn = t.closest('[data-smslink]');
+  if (smsBtn) {
+    e.preventDefault();
+    const a = findArticle(smsBtn.dataset.smslink);
+    /* "sms:?&body=" is the one spelling both iOS and Android accept — iOS wants sms:&body=,
+       Android wants sms:?body=, and the empty query before the ampersand satisfies both. */
+    window.location.href = 'sms:?&body=' + encodeURIComponent(shareBody(a));
+    closeShareMenus();
+    return;
+  }
+
+  const natBtn = t.closest('[data-nativeshare]');
+  if (natBtn) {
+    e.preventDefault();
+    const a = findArticle(natBtn.dataset.nativeshare);
+    closeShareMenus();
+    try {
+      await navigator.share({ title: a.title, text: a.title, url: shareUrl(a) });
+    } catch (err) {
+      // AbortError just means the reader dismissed the sheet; nothing to report.
+      if (err && err.name !== 'AbortError') toast('Sharing was not available.');
+    }
+    return;
+  }
+
+  const delStart = t.closest('[data-delprof]');
+  if (delStart) { PENDING_DELETE = delStart.dataset.delprof; return viewPick(); }
+
+  const delCancel = t.closest('[data-delcancel]');
+  if (delCancel) { PENDING_DELETE = null; return viewPick(); }
+
+  const delExport = t.closest('[data-delexport]');
+  if (delExport) {
+    const u = loadProfile(delExport.dataset.delexport);
+    if (u) { exportProfile(u); toast('Exported. The delete is still waiting.'); }
+    return;
+  }
+
+  const delGo = t.closest('[data-delconfirm]');
+  if (delGo) {
+    const id = delGo.dataset.delconfirm;
+    const gone = (listProfiles().find(p => p.id === id) || {}).name || 'Profile';
+    deleteProfile(id);
+    PENDING_DELETE = null;
+    toast(`Deleted ${gone}.`);
+    return viewPick();
+  }
 
   const use = t.closest('[data-use]');
   if (use) { const u = loadProfile(use.dataset.use); if (u) { USER = u; lsSet('active', u.id); go(u.step === 'ready' ? 'feed' : 'onboard'); } return; }
@@ -2686,6 +2953,8 @@ document.addEventListener('change', async e => {
 
 (async function boot() {
   applyTheme();          // before first paint, so there's no flash of the wrong palette
+  // Gates the "Share…" item: no point offering a native sheet the browser will not open.
+  if (navigator.share) document.documentElement.classList.add('can-share');
   try {
     DATA = window.__YJ_DATA__;
   } catch (e) {
